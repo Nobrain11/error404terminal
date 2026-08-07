@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  telegramId  String   @unique
+  username    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  wallets      Wallet[]
+  sessions     Session[]
+  alerts       Alert[]
+  watchlists   Watchlist[]
+  transactions Transaction[]
+  settings     Settings?
+  referral     Referral?
+}
+
+model Wallet {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String   @default("Wallet 1")
+  address         String   @unique
+  encryptedKey    String
+  encryptedPhrase String?
+  isDefault       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+  portfolio    Portfolio[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Transaction {
+  id        String   @id @default(cuid())
+  userId    String
+  walletId  String
+  hash      String   @unique
+  type      String
+  tokenIn   String?
+  tokenOut  String?
+  amountIn  String?
+  amountOut String?
+  status    String   @default("pending")
+  gasUsed   String?
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  wallet Wallet @relation(fields: [walletId], references: [id])
+}
+
+model Portfolio {
+  id        String   @id @default(cuid())
+  walletId  String
+  token     String
+  amount    String
+  avgEntry  String
+  updatedAt DateTime @updatedAt
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  token     String?
+  condition String
+  value     String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Watchlist {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Settings {
+  id           String  @id @default(cuid())
+  userId       String  @unique
+  slippage     String  @default("0.5")
+  gasPriority  String  @default("fast")
+  language     String  @default("en")
+  theme        String  @default("dark")
+  notifications Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Referral {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  code      String   @unique
+  uses      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Token {
+  id           String   @id @default(cuid())
+  address      String   @unique
+  name         String
+  symbol       String
+  decimals     Int
+  verified     Boolean  @default(false)
+  logoUrl      String?
+  website      String?
+  telegram     String?
+  twitter      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
