@@ -48,4 +48,11 @@
     "@types/bcryptjs": "2.4.6",
     "eslint": "8.57.1",
     "eslint-config-next": "15.0.7",
-    "postcss":
+    "postcss": "8.4.49",
+    "autoprefixer": "10.4.20"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
