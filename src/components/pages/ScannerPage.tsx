@@ -16,62 +16,100 @@ export default function ScannerPage() {
   function scan() {
     if (!ca) return;
     setLoading(true);
-    setTimeout(() => { setLoading(false); setScanned(true); }, 1200);
+    setTimeout(() => {
+      setLoading(false);
+      setScanned(true);
+    }, 1200);
   }
 
   const TABS = ["Quick", "Full Audit", "Holders", "Contract", "Dev"];
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "10px 16px 100px", scrollbarWidth: "none" }}>
+      {/* Input */}
       <div style={{ position: "relative", marginBottom: 10 }}>
         <input
           value={ca}
-          onChange={e => setCa(e.target.value)}
+          onChange={(e) => setCa(e.target.value)}
           placeholder="Paste contract address…"
           style={{
-            width: "100%", background: S, border: `1px solid ${B}`,
-            borderRadius: 12, padding: "11px 80px 11px 14px",
-            fontSize: 13, color: "#f2f2f7", outline: "none",
+            width: "100%",
+            background: S,
+            border: `1px solid ${B}`,
+            borderRadius: 12,
+            padding: "11px 80px 11px 14px",
+            fontSize: 13,
+            color: "#f2f2f7",
+            outline: "none",
             fontFamily: "monospace",
           }}
         />
-        <button onClick={scan} style={{
-          position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
-          background: G, border: "none", borderRadius: 9, padding: "6px 14px",
-          fontSize: 12, fontWeight: 700, color: "#000", cursor: "pointer",
-        }}>
+        <button
+          onClick={scan}
+          style={{
+            position: "absolute",
+            right: 6,
+            top: "50%",
+            transform: "translateY(-50%)",
+            background: G,
+            border: "none",
+            borderRadius: 9,
+            padding: "6px 14px",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "#000",
+            cursor: "pointer",
+          }}
+        >
           {loading ? "…" : "Scan"}
         </button>
       </div>
 
+      {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 12, overflowX: "auto", scrollbarWidth: "none" }}>
-        {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 100,
-            border: `1px solid ${tab === t ? G : B}`,
-            background: tab === t ? "rgba(0,200,5,0.12)" : "none",
-            color: tab === t ? G : T2, cursor: "pointer", whiteSpace: "nowrap",
-          }}>{t}</button>
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: "5px 12px",
+              borderRadius: 100,
+              border: `1px solid ${tab === t ? G : B}`,
+              background: tab === t ? "rgba(0,200,5,0.12)" : "none",
+              color: tab === t ? G : T2,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {t}
+          </button>
         ))}
       </div>
 
+      {/* Empty state */}
       {!scanned && !loading && (
         <div style={{ textAlign: "center", padding: "48px 24px" }}>
           <div style={{ fontSize: 48, marginBottom: 12 }}>🛡</div>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Contract Scanner</div>
-          <div style={{ fontSize: 13, color: T2 }}>Paste any contract address above to run a full audit instantly.</div>
+          <div style={{ fontSize: 13, color: T2 }}>
+            Paste any contract address above to run a full audit instantly.
+          </div>
         </div>
       )}
 
+      {/* Loading */}
       {loading && (
         <div style={{ textAlign: "center", padding: "48px 24px" }}>
           <div style={{ fontSize: 13, color: T2 }}>Scanning…</div>
         </div>
       )}
 
+      {/* Results */}
       {scanned && (
         <>
-          {/* Score */}
+          {/* Safety Score */}
           <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={{ fontSize: 14, fontWeight: 700 }}>Safety Score</span>
@@ -90,15 +128,18 @@ export default function ScannerPage() {
                 ["✅", "Tax: 0% / 0%"],
               ].map(([icon, label]) => (
                 <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: T2 }}>
-                  <span>{icon}</span><span>{label}</span>
+                  <span>{icon}</span>
+                  <span>{label}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Market */}
+          {/* Market Data */}
           <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>Market Data</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>
+              Market Data
+            </div>
             {[
               ["Price", "$0.004821"],
               ["Market Cap", "$4.8M"],
@@ -117,7 +158,9 @@ export default function ScannerPage() {
           {/* Holders */}
           {(tab === "Holders" || tab === "Full Audit") && (
             <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>Top Holders</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                Top Holders
+              </div>
               {[
                 ["🏦 Liquidity Pool", "48.2%", G],
                 ["👨‍💻 Dev Wallet", "3.1%", "#FFD60A"],
@@ -142,7 +185,9 @@ export default function ScannerPage() {
           {/* Contract */}
           {(tab === "Contract" || tab === "Full Audit") && (
             <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>Contract Info</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                Contract Info
+              </div>
               {[
                 ["Standard", "ERC-20"],
                 ["Decimals", "18"],
@@ -164,7 +209,9 @@ export default function ScannerPage() {
           {/* Dev */}
           {(tab === "Dev" || tab === "Full Audit") && (
             <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>Developer Analysis</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T2, marginBottom: 10, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                Developer Analysis
+              </div>
               {[
                 ["Dev Wallet", "0x9b2e…f44c"],
                 ["Dev Holdings", "3.1%"],
@@ -181,10 +228,21 @@ export default function ScannerPage() {
             </div>
           )}
 
-          <button onClick={() => onTrade} style={{
-            width: "100%", padding: 14, borderRadius: 12, border: "none",
-            background: G, color: "#000", fontSize: 14, fontWeight: 800, cursor: "pointer",
-          }}>
+          {/* Buy Button */}
+          <button
+            onClick={() => {}}
+            style={{
+              width: "100%",
+              padding: 14,
+              borderRadius: 12,
+              border: "none",
+              background: G,
+              color: "#000",
+              fontSize: 14,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
             🟢 Buy This Token
           </button>
         </>
