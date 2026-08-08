@@ -3,7 +3,6 @@ import { ethers } from "ethers";
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL;
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.robinhoodchain.com";
 
 // ── State ──────────────────────────────────────────────────────────────────
 interface UserState {
@@ -54,7 +53,11 @@ function createRealWallet() {
 function importFromPhrase(phrase: string) {
   try {
     const wallet = ethers.Wallet.fromPhrase(phrase.trim());
-    return { address: wallet.address, privateKey: wallet.privateKey, mnemonic: phrase.trim() };
+    return {
+      address: wallet.address,
+      privateKey: wallet.privateKey,
+      mnemonic: phrase.trim(),
+    };
   } catch {
     return null;
   }
@@ -63,13 +66,16 @@ function importFromPhrase(phrase: string) {
 function importFromKey(key: string) {
   try {
     const wallet = new ethers.Wallet(key.trim());
-    return { address: wallet.address, privateKey: wallet.privateKey, mnemonic: "" };
+    return {
+      address: wallet.address,
+      privateKey: wallet.privateKey,
+      mnemonic: "",
+    };
   } catch {
     return null;
   }
 }
 
-// Mock token data — replace with real DEX calls
 function getMockToken(ca: string) {
   return {
     name: "RobinToken",
@@ -89,15 +95,16 @@ function getMockToken(ca: string) {
 }
 
 // ── Header ─────────────────────────────────────────────────────────────────
-const HEADER = `🤖 *ERROR404 Terminal*\n_The first professional trading terminal built for Robinhood Chain._\n\n`;
+const HEADER = `🤖 *ERROR404 Terminal*\n_The first professional trading terminal built for Robinhood Chain\._\n\n`;
 
-// ── MAIN MENU ──────────────────────────────────────────────────────────────
+// ── Main Menu ──────────────────────────────────────────────────────────────
 async function showMain(ctx: any, edit = false) {
   const userId = ctx.from?.id!;
   const s = getState(userId);
-  const walletLine = s.wallets.length > 0
-    ? `\n👛 *Active:* \`${shortAddr(s.wallets[s.activeWallet]?.address || "")}\``
-    : "\n👛 *No wallet connected*";
+  const walletLine =
+    s.wallets.length > 0
+      ? `\n👛 *Active:* \`${shortAddr(s.wallets[s.activeWallet]?.address || "")}\``
+      : "\n👛 *No wallet connected*";
 
   const text =
     HEADER +
@@ -109,8 +116,8 @@ async function showMain(ctx: any, edit = false) {
     `🎯 Orders — Limit & DCA orders\n` +
     `⚙️ Settings — Preferences\n` +
     `🔍 Scanner — Audit any token\n\n` +
-    `⚡ _Paste any token CA to trade instantly._\n\n` +
-    `[🌐 Website](https://error404.app) • [📚 Docs](https://docs.error404.app) • [💬 Telegram](https://t.me/error404terminal)`;
+    `⚡ _Paste any token CA to trade instantly\._\n\n` +
+    `[🌐 Website](https://error404\.app) • [💬 Telegram](https://t\.me/error404terminal)`;
 
   const keyboard = Markup.inlineKeyboard([
     [
@@ -129,13 +136,21 @@ async function showMain(ctx: any, edit = false) {
   ]);
 
   if (edit) {
-    await ctx.editMessageText(text, { parse_mode: "Markdown", ...keyboard, disable_web_page_preview: true });
+    await ctx.editMessageText(text, {
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+      ...keyboard,
+    });
   } else {
-    await ctx.reply(text, { parse_mode: "Markdown", ...keyboard, disable_web_page_preview: true });
+    await ctx.reply(text, {
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+      ...keyboard,
+    });
   }
 }
 
-// ── START ──────────────────────────────────────────────────────────────────
+// ── Start ──────────────────────────────────────────────────────────────────
 bot.start(async (ctx) => {
   await showMain(ctx, false);
 });
@@ -145,7 +160,7 @@ bot.action("menu:main", async (ctx) => {
   await showMain(ctx, true);
 });
 
-// ── CHAINS ─────────────────────────────────────────────────────────────────
+// ── Chains ─────────────────────────────────────────────────────────────────
 bot.action("chains:view", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageText(
@@ -160,21 +175,30 @@ bot.action("chains:view", async (ctx) => {
   );
 });
 
-// ── WALLETS ────────────────────────────────────────────────────────────────
+bot.action("chain:rbn", async (ctx) => {
+  await ctx.answerCbQuery("Already on Robinhood Chain");
+});
+
+// ── Wallets ────────────────────────────────────────────────────────────────
 bot.action("wallets:menu", async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from?.id!;
   const s = getState(userId);
 
-  const walletRows = s.wallets.map((w, i) =>
-    [Markup.button.callback(
+  const walletRows = s.wallets.map((w, i) => [
+    Markup.button.callback(
       `${i === s.activeWallet ? "✅" : "👛"} ${w.name} — ${shortAddr(w.address)}`,
       `wallet:select:${i}`
-    )]
-  );
+    ),
+  ]);
 
   await ctx.editMessageText(
-    HEADER + `👛 *Wallets*\n\n${s.wallets.length === 0 ? "No wallets yet. Create or import one." : `${s.wallets.length} wallet(s) connected.`}`,
+    HEADER +
+      `👛 *Wallets*\n\n${
+        s.wallets.length === 0
+          ? "No wallets yet\. Create or import one\."
+          : `${s.wallets.length} wallet\(s\) connected\.`
+      }`,
     {
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([
@@ -204,18 +228,23 @@ bot.action("wallet:create", async (ctx) => {
 
   await ctx.editMessageText(
     HEADER +
-    `👛 *New Wallet Created*\n\n` +
-    `📍 *Address:*\n\`${w.address}\`\n\n` +
-    `🔑 *Private Key:*\n\`${w.privateKey}\`\n\n` +
-    `📝 *Recovery Phrase:*\n\`${w.mnemonic}\`\n\n` +
-    `⚠️ *SAVE THIS NOW.*\n` +
-    `Screenshot or write it down.\n` +
-    `This will NOT be shown again.\n\n` +
-    `Tap ✅ once you have saved it.`,
+      `👛 *New Wallet Created*\n\n` +
+      `📍 *Address:*\n\`${w.address}\`\n\n` +
+      `🔑 *Private Key:*\n\`${w.privateKey}\`\n\n` +
+      `📝 *Recovery Phrase:*\n\`${w.mnemonic}\`\n\n` +
+      `⚠️ *SAVE THIS NOW\.*\n` +
+      `Screenshot or write it down\.\n` +
+      `This will NOT be shown again\.\n\n` +
+      `Tap ✅ once you have saved it\.`,
     {
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([
-        [Markup.button.callback(`✅ Saved — Activate Wallet ${walletNum}`, "wallet:saved")],
+        [
+          Markup.button.callback(
+            `✅ Saved — Activate Wallet ${walletNum}`,
+            "wallet:saved"
+          ),
+        ],
         [Markup.button.callback("⬅ Back", "wallets:menu")],
       ]),
     }
@@ -238,9 +267,9 @@ bot.action("wallet:saved", async (ctx) => {
 
   await ctx.editMessageText(
     HEADER +
-    `✅ *Wallet ${walletNum} Activated*\n\n` +
-    `📍 \`${s.data.pending_address}\`\n\n` +
-    `Ready to trade on Robinhood Chain.`,
+      `✅ *Wallet ${walletNum} Activated*\n\n` +
+      `📍 \`${s.data.pending_address}\`\n\n` +
+      `Ready to trade on Robinhood Chain\.`,
     {
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([
@@ -274,10 +303,13 @@ bot.action("wallet:phrase", async (ctx) => {
   const userId = ctx.from?.id!;
   getState(userId).step = "awaiting_phrase";
   await ctx.editMessageText(
-    HEADER + `🔑 *Recovery Phrase*\n\nSend your 12 or 24 word phrase now.\n\n⚠️ Never share with anyone.`,
+    HEADER +
+      `🔑 *Recovery Phrase*\n\nSend your 12 or 24 word phrase now\.\n\n⚠️ Never share with anyone\.`,
     {
       parse_mode: "Markdown",
-      ...Markup.inlineKeyboard([[Markup.button.callback("❌ Cancel", "wallets:menu")]]),
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("❌ Cancel", "wallets:menu")],
+      ]),
     }
   );
 });
@@ -287,15 +319,17 @@ bot.action("wallet:key", async (ctx) => {
   const userId = ctx.from?.id!;
   getState(userId).step = "awaiting_key";
   await ctx.editMessageText(
-    HEADER + `🗝 *Private Key*\n\nSend your private key now.\n\n⚠️ Never share with anyone.`,
+    HEADER +
+      `🗝 *Private Key*\n\nSend your private key now\.\n\n⚠️ Never share with anyone\.`,
     {
       parse_mode: "Markdown",
-      ...Markup.inlineKeyboard([[Markup.button.callback("❌ Cancel", "wallets:menu")]]),
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("❌ Cancel", "wallets:menu")],
+      ]),
     }
   );
 });
 
-// Wallet select
 bot.action(/wallet:select:(\d+)/, async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from?.id!;
@@ -305,7 +339,7 @@ bot.action(/wallet:select:(\d+)/, async (ctx) => {
   const w = s.wallets[i];
   await ctx.editMessageText(
     HEADER +
-    `✅ *${w.name} Selected*\n\n📍 \`${w.address}\`\n\nThis is now your active wallet.`,
+      `✅ *${w.name} Selected*\n\n📍 \`${w.address}\`\n\nThis is now your active wallet\.`,
     {
       parse_mode: "Markdown",
       ...Markup.inlineKeyboard([
@@ -315,15 +349,15 @@ bot.action(/wallet:select:(\d+)/, async (ctx) => {
   );
 });
 
-// ── TOKEN SCREEN ───────────────────────────────────────────────────────────
+// ── Token Screen ───────────────────────────────────────────────────────────
 async function showTokenScreen(ctx: any, ca: string, edit = false) {
   const t = getMockToken(ca);
   const pos = t.change24h > 0;
-  const change = `${pos ? "🟢 +" : "🔴 "}${t.change24h}%`;
+  const change = `${pos ? "🟢 \\+" : "🔴 "}${t.change24h}%`;
 
   const text =
     HEADER +
-    `${t.verified ? "✅" : "⚠️"} *${t.name}* (${t.ticker})\n` +
+    `${t.verified ? "✅" : "⚠️"} *${t.name}* \\(${t.ticker}\\)\n` +
     `\`${ca}\`\n\n` +
     `💰 *Price:* $${t.price.toFixed(6)}\n` +
     `${change}\n` +
@@ -353,19 +387,18 @@ async function showTokenScreen(ctx: any, ca: string, edit = false) {
   ]);
 
   if (edit) {
-    await ctx.editMessageText(text, { parse_mode: "Markdown", ...keyboard });
+    await ctx.editMessageText(text, { parse_mode: "MarkdownV2", ...keyboard });
   } else {
-    await ctx.reply(text, { parse_mode: "Markdown", ...keyboard });
+    await ctx.reply(text, { parse_mode: "MarkdownV2", ...keyboard });
   }
 }
 
-// Refresh token
 bot.action(/token:refresh:(.+)/, async (ctx) => {
   await ctx.answerCbQuery("🔄 Refreshing...");
   await showTokenScreen(ctx, ctx.match[1], true);
 });
 
-// ── BUY MENU ───────────────────────────────────────────────────────────────
+// ── Buy ────────────────────────────────────────────────────────────────────
 bot.action(/buy:menu:(.+)/, async (ctx) => {
   await ctx.answerCbQuery();
   const ca = ctx.match[1];
@@ -375,12 +408,12 @@ bot.action(/buy:menu:(.+)/, async (ctx) => {
 
   await ctx.editMessageText(
     HEADER +
-    `🟢 *Buy ${t.ticker}*\n\n` +
-    `💰 Price: $${t.price.toFixed(6)}\n` +
-    `⚙️ Slippage: ${s.slippage}% | Gas: ${s.gas}\n\n` +
-    `Select amount:`,
+      `🟢 *Buy ${t.ticker}*\n\n` +
+      `💰 Price: $${t.price.toFixed(6)}\n` +
+      `⚙️ Slippage: ${s.slippage}% \\| Gas: ${s.gas}\n\n` +
+      `Select amount:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("0.01 ETH", `buy:confirm:${ca}:0.01`),
@@ -393,8 +426,8 @@ bot.action(/buy:menu:(.+)/, async (ctx) => {
           Markup.button.callback("✏️ Custom", `buy:custom:${ca}`),
         ],
         [
-          Markup.button.callback("⚙ Slippage", `settings:slippage`),
-          Markup.button.callback("⛽ Gas", `settings:gas`),
+          Markup.button.callback("⚙️ Slippage", "settings:slippage"),
+          Markup.button.callback("⛽ Gas", "settings:gas"),
         ],
         [
           Markup.button.callback("⬅ Back", `token:refresh:${ca}`),
@@ -410,19 +443,19 @@ bot.action(/buy:confirm:(.+):(.+)/, async (ctx) => {
   const ca = ctx.match[1];
   const amount = ctx.match[2];
   const t = getMockToken(ca);
-  const estimated = (parseFloat(amount) / t.price).toFixed(0);
+  const estimated = Math.floor(parseFloat(amount) / t.price).toLocaleString();
 
   await ctx.editMessageText(
     HEADER +
-    `🟢 *Confirm Buy*\n\n` +
-    `🪙 Token: ${t.name} (${t.ticker})\n` +
-    `💰 Spending: ${amount} ETH\n` +
-    `📦 Estimated: ~${parseInt(estimated).toLocaleString()} ${t.ticker}\n` +
-    `📉 Slippage: 0.5%\n` +
-    `⛽ Gas: ~$0.08\n\n` +
-    `Confirm?`,
+      `🟢 *Confirm Buy*\n\n` +
+      `🪙 Token: ${t.name} \\(${t.ticker}\\)\n` +
+      `💰 Spending: ${amount} ETH\n` +
+      `📦 Estimated: ~${estimated} ${t.ticker}\n` +
+      `📉 Slippage: 0\\.5%\n` +
+      `⛽ Gas: ~$0\\.08\n\n` +
+      `Confirm?`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("✅ Confirm", `buy:execute:${ca}:${amount}`),
@@ -440,21 +473,21 @@ bot.action(/buy:execute:(.+):(.+)/, async (ctx) => {
   const t = getMockToken(ca);
 
   await ctx.editMessageText(
-    HEADER + `⏳ *Transaction Pending...*\n\nBuying ${t.ticker} with ${amount} ETH\n\nPlease wait...`,
-    { parse_mode: "Markdown" }
+    HEADER +
+      `⏳ *Transaction Pending\.\.\.*\n\nBuying ${t.ticker} with ${amount} ETH\n\nPlease wait\.\.\.`,
+    { parse_mode: "MarkdownV2" }
   );
 
   setTimeout(async () => {
-    const estimated = (parseFloat(amount) / t.price).toFixed(0);
+    const estimated = Math.floor(parseFloat(amount) / t.price).toLocaleString();
     await ctx.editMessageText(
       HEADER +
-      `✅ *Buy Confirmed!*\n\n` +
-      `💰 Spent: ${amount} ETH\n` +
-      `📦 Received: ${parseInt(estimated).toLocaleString()} ${t.ticker}\n` +
-      `🔗 Hash: \`0x4a2b…f91c\`\n\n` +
-      `View your position in portfolio.`,
+        `✅ *Buy Confirmed\\!*\n\n` +
+        `💰 Spent: ${amount} ETH\n` +
+        `📦 Received: ${estimated} ${t.ticker}\n` +
+        `🔗 Hash: \`0x4a2b…f91c\``,
       {
-        parse_mode: "Markdown",
+        parse_mode: "MarkdownV2",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📊 Portfolio", "portfolio:view")],
           [Markup.button.callback(`🔄 Trade Again`, `token:refresh:${ca}`)],
@@ -465,7 +498,7 @@ bot.action(/buy:execute:(.+):(.+)/, async (ctx) => {
   }, 2000);
 });
 
-// ── SELL MENU ──────────────────────────────────────────────────────────────
+// ── Sell ───────────────────────────────────────────────────────────────────
 bot.action(/sell:menu:(.+)/, async (ctx) => {
   await ctx.answerCbQuery();
   const ca = ctx.match[1];
@@ -473,13 +506,13 @@ bot.action(/sell:menu:(.+)/, async (ctx) => {
 
   await ctx.editMessageText(
     HEADER +
-    `🔴 *Sell ${t.ticker}*\n\n` +
-    `💰 Price: $${t.price.toFixed(6)}\n` +
-    `💼 Balance: 1,842,301 ${t.ticker}\n` +
-    `💵 Value: ~$888.12\n\n` +
-    `Select percentage to sell:`,
+      `🔴 *Sell ${t.ticker}*\n\n` +
+      `💰 Price: $${t.price.toFixed(6)}\n` +
+      `💼 Balance: 1,842,301 ${t.ticker}\n` +
+      `💵 Value: ~$888\\.12\n\n` +
+      `Select percentage to sell:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("25%", `sell:confirm:${ca}:25`),
@@ -506,20 +539,20 @@ bot.action(/sell:confirm:(.+):(\d+)/, async (ctx) => {
   const pct = ctx.match[2];
   const t = getMockToken(ca);
   const balance = 1842301;
-  const amount = Math.floor(balance * parseInt(pct) / 100);
-  const value = (amount * t.price).toFixed(2);
+  const amount = Math.floor((balance * parseInt(pct)) / 100).toLocaleString();
+  const value = ((balance * parseInt(pct)) / 100 * t.price).toFixed(2);
 
   await ctx.editMessageText(
     HEADER +
-    `🔴 *Confirm Sell*\n\n` +
-    `🪙 Token: ${t.ticker}\n` +
-    `📦 Selling: ${amount.toLocaleString()} ${t.ticker} (${pct}%)\n` +
-    `💵 Estimated: ~$${value}\n` +
-    `📉 Slippage: 0.5%\n` +
-    `⛽ Gas: ~$0.08\n\n` +
-    `Confirm?`,
+      `🔴 *Confirm Sell*\n\n` +
+      `🪙 Token: ${t.ticker}\n` +
+      `📦 Selling: ${amount} ${t.ticker} \\(${pct}%\\)\n` +
+      `💵 Estimated: ~$${value}\n` +
+      `📉 Slippage: 0\\.5%\n` +
+      `⛽ Gas: ~$0\\.08\n\n` +
+      `Confirm?`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("✅ Confirm Sell", `sell:execute:${ca}:${pct}`),
@@ -537,19 +570,21 @@ bot.action(/sell:execute:(.+):(\d+)/, async (ctx) => {
   const t = getMockToken(ca);
 
   await ctx.editMessageText(
-    HEADER + `⏳ *Selling ${pct}% of ${t.ticker}...*\n\nPlease wait...`,
-    { parse_mode: "Markdown" }
+    HEADER +
+      `⏳ *Selling ${pct}% of ${t.ticker}\.\.\.*\n\nPlease wait\.\.\.`,
+    { parse_mode: "MarkdownV2" }
   );
 
   setTimeout(async () => {
+    const value = ((1842301 * parseInt(pct)) / 100 * t.price).toFixed(2);
     await ctx.editMessageText(
       HEADER +
-      `✅ *Sell Confirmed!*\n\n` +
-      `🪙 Sold: ${pct}% of ${t.ticker}\n` +
-      `💵 Received: ~$${(1842301 * parseInt(pct) / 100 * t.price).toFixed(2)} ETH\n` +
-      `🔗 Hash: \`0x9b3c…a22f\``,
+        `✅ *Sell Confirmed\\!*\n\n` +
+        `🪙 Sold: ${pct}% of ${t.ticker}\n` +
+        `💵 Received: ~$${value}\n` +
+        `🔗 Hash: \`0x9b3c…a22f\``,
       {
-        parse_mode: "Markdown",
+        parse_mode: "MarkdownV2",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📊 Portfolio", "portfolio:view")],
           [Markup.button.callback("🏠 Menu", "menu:main")],
@@ -559,21 +594,19 @@ bot.action(/sell:execute:(.+):(\d+)/, async (ctx) => {
   }, 2000);
 });
 
-// ── LIMIT ORDER ─────────────────────────────────────────────────────────────
+// ── Limit ──────────────────────────────────────────────────────────────────
 bot.action(/limit:menu:(.+)/, async (ctx) => {
   await ctx.answerCbQuery();
   const ca = ctx.match[1];
-  const userId = ctx.from?.id!;
   const t = getMockToken(ca);
-  getState(userId).step = `awaiting_limit:${ca}`;
 
   await ctx.editMessageText(
     HEADER +
-    `📈 *Limit Order — ${t.ticker}*\n\n` +
-    `Current Price: $${t.price.toFixed(6)}\n\n` +
-    `Choose type:`,
+      `📈 *Limit Order — ${t.ticker}*\n\n` +
+      `Current Price: $${t.price.toFixed(6)}\n\n` +
+      `Choose type:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("🟢 Buy Limit", `limit:buy:${ca}`),
@@ -595,11 +628,11 @@ bot.action(/limit:(buy|sell):(.+)/, async (ctx) => {
 
   await ctx.editMessageText(
     HEADER +
-    `📈 *${type === "buy" ? "🟢 Buy" : "🔴 Sell"} Limit — ${t.ticker}*\n\n` +
-    `Current Price: $${t.price.toFixed(6)}\n\n` +
-    `Send your target price (e.g. \`0.006\`):`,
+      `📈 *${type === "buy" ? "🟢 Buy" : "🔴 Sell"} Limit — ${t.ticker}*\n\n` +
+      `Current Price: $${t.price.toFixed(6)}\n\n` +
+      `Send your target price \\(e\\.g\\. \`0\\.006\`\\):`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("❌ Cancel", `token:refresh:${ca}`)],
       ]),
@@ -607,7 +640,7 @@ bot.action(/limit:(buy|sell):(.+)/, async (ctx) => {
   );
 });
 
-// ── MULTI WALLET BUY ───────────────────────────────────────────────────────
+// ── Multi Wallet ───────────────────────────────────────────────────────────
 bot.action(/multi:menu:(.+)/, async (ctx) => {
   await ctx.answerCbQuery();
   const ca = ctx.match[1];
@@ -618,12 +651,12 @@ bot.action(/multi:menu:(.+)/, async (ctx) => {
   if (s.wallets.length < 2) {
     await ctx.editMessageText(
       HEADER +
-      `👥 *Multi-Wallet Buy*\n\n` +
-      `You need at least 2 wallets.\n` +
-      `Currently: ${s.wallets.length} wallet(s)\n\n` +
-      `Add more wallets first.`,
+        `👥 *Multi\\-Wallet Buy*\n\n` +
+        `You need at least 2 wallets\.\n` +
+        `Currently: ${s.wallets.length} wallet\\(s\\)\n\n` +
+        `Add more wallets first\.`,
       {
-        parse_mode: "Markdown",
+        parse_mode: "MarkdownV2",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("➕ Add Wallet", "wallet:create")],
           [Markup.button.callback("⬅ Back", `token:refresh:${ca}`)],
@@ -642,12 +675,12 @@ bot.action(/multi:menu:(.+)/, async (ctx) => {
 
   await ctx.editMessageText(
     HEADER +
-    `👥 *Multi-Wallet Buy — ${t.ticker}*\n\n` +
-    `Buy from multiple wallets simultaneously.\n` +
-    `Amount per wallet: 0.05 ETH\n\n` +
-    `Select wallets:`,
+      `👥 *Multi\\-Wallet Buy — ${t.ticker}*\n\n` +
+      `Buy from multiple wallets simultaneously\.\n` +
+      `Amount per wallet: 0\\.05 ETH\n\n` +
+      `Tap a wallet or buy all:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         ...walletRows,
         [Markup.button.callback("✅ Buy All Wallets", `multi:all:${ca}:0.05`)],
@@ -666,22 +699,24 @@ bot.action(/multi:all:(.+):(.+)/, async (ctx) => {
   const t = getMockToken(ca);
 
   await ctx.editMessageText(
-    HEADER + `⏳ *Multi-Wallet Buy Executing...*\n\n${s.wallets.length} wallets buying ${amount} ETH each...`,
-    { parse_mode: "Markdown" }
+    HEADER +
+      `⏳ *Multi\\-Wallet Buy Executing\.\.\.*\n\n${s.wallets.length} wallets buying ${amount} ETH each\.\.\.`,
+    { parse_mode: "MarkdownV2" }
   );
 
   setTimeout(async () => {
-    const results = s.wallets.map((w, i) =>
-      `✅ Wallet ${i + 1}: ${shortAddr(w.address)} — ${amount} ETH`
-    ).join("\n");
+    const results = s.wallets
+      .map((w, i) => `✅ Wallet ${i + 1}: ${shortAddr(w.address)} — ${amount} ETH`)
+      .join("\n");
+    const total = (parseFloat(amount) * s.wallets.length).toFixed(3);
 
     await ctx.editMessageText(
       HEADER +
-      `✅ *Multi-Wallet Buy Complete!*\n\n` +
-      results +
-      `\n\nTotal spent: ${(parseFloat(amount) * s.wallets.length).toFixed(3)} ETH`,
+        `✅ *Multi\\-Wallet Buy Complete\\!*\n\n` +
+        results +
+        `\n\nTotal spent: ${total} ETH`,
       {
-        parse_mode: "Markdown",
+        parse_mode: "MarkdownV2",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("📊 Portfolio", "portfolio:view")],
           [Markup.button.callback("🏠 Menu", "menu:main")],
@@ -691,7 +726,7 @@ bot.action(/multi:all:(.+):(.+)/, async (ctx) => {
   }, 2500);
 });
 
-// ── SCANNER ─────────────────────────────────────────────────────────────────
+// ── Scanner ────────────────────────────────────────────────────────────────
 bot.action("scanner:menu", async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from?.id!;
@@ -699,12 +734,12 @@ bot.action("scanner:menu", async (ctx) => {
 
   await ctx.editMessageText(
     HEADER +
-    `🔍 *Contract Scanner*\n\n` +
-    `Send any contract address to audit it instantly.\n\n` +
-    `Analyzes:\n` +
-    `• Safety score\n• Liquidity & ownership\n• Holder distribution\n• Tax & honeypot\n• Dev wallet activity`,
+      `🔍 *Contract Scanner*\n\n` +
+      `Send any contract address to audit it instantly\.\n\n` +
+      `Analyzes:\n` +
+      `• Safety score\n• Liquidity & ownership\n• Holder distribution\n• Tax & honeypot\n• Dev wallet activity`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("⬅ Back", "menu:main")],
       ]),
@@ -721,7 +756,8 @@ bot.action(/scan:ca:(.+)/, async (ctx) => {
 async function runScan(ctx: any, ca: string, edit = false) {
   const t = getMockToken(ca);
   const score = 82;
-  const bar = "🟩".repeat(Math.floor(score / 10)) + "⬛".repeat(10 - Math.floor(score / 10));
+  const filled = Math.floor(score / 10);
+  const bar = "🟩".repeat(filled) + "⬛".repeat(10 - filled);
 
   const text =
     HEADER +
@@ -741,10 +777,10 @@ async function runScan(ctx: any, ca: string, edit = false) {
     `Holders: ${t.holders.toLocaleString()}\n` +
     `Tax: Buy ${t.tax.buy}% / Sell ${t.tax.sell}%\n\n` +
     `*Top Holders*\n` +
-    `🏦 LP Pool: 48.2%\n` +
-    `👨‍💻 Dev: 3.1%\n` +
-    `🔥 Burn: 5.0%\n` +
-    `👤 Others: 43.7%`;
+    `🏦 LP Pool: 48\\.2%\n` +
+    `👨‍💻 Dev: 3\\.1%\n` +
+    `🔥 Burn: 5\\.0%\n` +
+    `👤 Others: 43\\.7%`;
 
   const keyboard = Markup.inlineKeyboard([
     [
@@ -755,29 +791,29 @@ async function runScan(ctx: any, ca: string, edit = false) {
   ]);
 
   if (edit) {
-    await ctx.editMessageText(text, { parse_mode: "Markdown", ...keyboard });
+    await ctx.editMessageText(text, { parse_mode: "MarkdownV2", ...keyboard });
   } else {
-    await ctx.reply(text, { parse_mode: "Markdown", ...keyboard });
+    await ctx.reply(text, { parse_mode: "MarkdownV2", ...keyboard });
   }
 }
 
-// ── PORTFOLIO ──────────────────────────────────────────────────────────────
+// ── Portfolio ──────────────────────────────────────────────────────────────
 bot.action("portfolio:view", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageText(
     HEADER +
-    `📊 *Portfolio*\n\n` +
-    `📍 \`0x3a7f…9b44\`\n` +
-    `💰 Total: *$1,820.20*\n` +
-    `📈 Today: +$148.40 🟢\n` +
-    `📊 Total PnL: -$70.60 🔴\n` +
-    `🎯 Win Rate: 62%\n\n` +
-    `*Positions*\n` +
-    `🟢 RBTK — $684.58 — *+55.5%*\n` +
-    `💎 RIFI — $189.22 — *+13.8%*\n` +
-    `🐸 CPEPE — $946.40 — *-25.4%*`,
+      `📊 *Portfolio*\n\n` +
+      `📍 \`0x3a7f…9b44\`\n` +
+      `💰 Total: *$1,820\\.20*\n` +
+      `📈 Today: \\+$148\\.40 🟢\n` +
+      `📊 Total PnL: \\-$70\\.60 🔴\n` +
+      `🎯 Win Rate: 62%\n\n` +
+      `*Positions*\n` +
+      `🟢 RBTK — $684\\.58 — *\\+55\\.5%*\n` +
+      `💎 RIFI — $189\\.22 — *\\+13\\.8%*\n` +
+      `🐸 CPEPE — $946\\.40 — *\\-25\\.4%*`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("💸 Deposit", "wallet:deposit"),
@@ -790,17 +826,18 @@ bot.action("portfolio:view", async (ctx) => {
   );
 });
 
-// ── ORDERS ─────────────────────────────────────────────────────────────────
+// ── Orders ─────────────────────────────────────────────────────────────────
 bot.action("orders:view", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageText(
     HEADER +
-    `🎯 *Active Orders*\n\n` +
-    `📈 Limit Buy — RBTK @ $0.003 — 0.1 ETH\n` +
-    `🔴 Limit Sell — RIFI @ $2.50 — 50%\n\n` +
-    `No DCA orders active.`,
+      `🎯 *Active Orders*\n\n` +
+      `📈 Limit Buy — RBTK @ $0\\.003 — 0\\.1 ETH\n` +
+      `🔴 Limit Sell — RIFI @ $2\\.50 — 50%\n` +
+      `🛑 Stop Loss — CPEPE @ $0\\.00015 — 100%\n\n` +
+      `No DCA orders active\.`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("📈 New Limit", "orders:new_limit"),
@@ -813,20 +850,49 @@ bot.action("orders:view", async (ctx) => {
   );
 });
 
-// ── SETTINGS ───────────────────────────────────────────────────────────────
+bot.action("orders:new_limit", async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(
+    HEADER +
+      `📈 *New Limit Order*\n\nPaste a contract address to set a limit order:`,
+    {
+      parse_mode: "MarkdownV2",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("⬅ Back", "orders:view")],
+      ]),
+    }
+  );
+});
+
+bot.action("orders:new_dca", async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(
+    HEADER +
+      `🔄 *New DCA Order*\n\nDCA \\(Dollar Cost Average\\) coming soon\.\n\nOpen the terminal to configure advanced orders:`,
+    {
+      parse_mode: "MarkdownV2",
+      ...Markup.inlineKeyboard([
+        [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
+        [Markup.button.callback("⬅ Back", "orders:view")],
+      ]),
+    }
+  );
+});
+
+// ── Settings ───────────────────────────────────────────────────────────────
 bot.action("settings:view", async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from?.id!;
   const s = getState(userId);
   await ctx.editMessageText(
     HEADER +
-    `⚙️ *Settings*\n\n` +
-    `📉 Slippage: ${s.slippage}%\n` +
-    `⛽ Gas: ${s.gas}\n` +
-    `🔔 Notifications: On\n` +
-    `🌐 Network: Robinhood Chain`,
+      `⚙️ *Settings*\n\n` +
+      `📉 Slippage: ${s.slippage}%\n` +
+      `⛽ Gas: ${s.gas}\n` +
+      `🔔 Notifications: On\n` +
+      `🌐 Network: Robinhood Chain`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback(`📉 Slippage: ${s.slippage}%`, "settings:slippage"),
@@ -849,7 +915,7 @@ bot.action("settings:slippage", async (ctx) => {
   await ctx.editMessageText(
     HEADER + `📉 *Slippage*\n\nCurrent: ${s.slippage}%\n\nSelect:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("0.1%", "slip:0.1"),
@@ -870,7 +936,7 @@ bot.action(/slip:(.+)/, async (ctx) => {
   await ctx.editMessageText(
     HEADER + `✅ Slippage set to *${ctx.match[1]}%*`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("⬅ Back", "settings:view")],
       ]),
@@ -885,7 +951,7 @@ bot.action("settings:gas", async (ctx) => {
   await ctx.editMessageText(
     HEADER + `⛽ *Gas Priority*\n\nCurrent: ${s.gas}\n\nSelect:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [
           Markup.button.callback("🐢 Normal", "gas:normal"),
@@ -905,7 +971,7 @@ bot.action(/gas:(.+)/, async (ctx) => {
   await ctx.editMessageText(
     HEADER + `✅ Gas set to *${ctx.match[1]}*`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("⬅ Back", "settings:view")],
       ]),
@@ -913,18 +979,18 @@ bot.action(/gas:(.+)/, async (ctx) => {
   );
 });
 
-// ── ALERTS ─────────────────────────────────────────────────────────────────
+// ── Alerts ─────────────────────────────────────────────────────────────────
 bot.action("alerts:list", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageText(
     HEADER +
-    `🔔 *Alerts*\n\n` +
-    `✅ RBTK — Price above $0.005\n` +
-    `✅ RIFI — Whale buy > $10K\n` +
-    `❌ ALL — Portfolio +20% daily\n\n` +
-    `_All alerts delivered via DM only._`,
+      `🔔 *Alerts*\n\n` +
+      `✅ RBTK — Price above $0\\.005\n` +
+      `✅ RIFI — Whale buy > $10K\n` +
+      `❌ ALL — Portfolio \\+20% daily\n\n` +
+      `_All alerts delivered via DM only\._`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("➕ New Alert", "alerts:create")],
         [Markup.button.webApp("🖥 Manage Alerts", `${APP_URL}/terminal`)],
@@ -939,7 +1005,7 @@ bot.action("alerts:create", async (ctx) => {
   await ctx.editMessageText(
     HEADER + `➕ *New Alert*\n\nChoose type:`,
     {
-      parse_mode: "Markdown",
+      parse_mode: "MarkdownV2",
       ...Markup.inlineKeyboard([
         [Markup.button.callback("📈 Price Target", "alert:price")],
         [Markup.button.callback("🐋 Whale Activity", "alert:whale")],
@@ -950,22 +1016,41 @@ bot.action("alerts:create", async (ctx) => {
   );
 });
 
-// ── REFERRAL ───────────────────────────────────────────────────────────────
+bot.action(/alert:(.+)/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const type = ctx.match[1];
+  const labels: Record<string, string> = {
+    price: "Price Target",
+    whale: "Whale Activity",
+    portfolio: "Portfolio",
+  };
+  await ctx.editMessageText(
+    HEADER +
+      `➕ *${labels[type] || type} Alert*\n\nSend the token CA you want to track:`,
+    {
+      parse_mode: "MarkdownV2",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("⬅ Back", "alerts:create")],
+      ]),
+    }
+  );
+});
+
+// ── Referral ───────────────────────────────────────────────────────────────
 bot.action("referral:view", async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from?.id!;
-  const code = `E404-${userId.toString().slice(-6).toUpperCase()}`;
+  const code = `E404\\-${userId.toString().slice(-6).toUpperCase()}`;
   await ctx.editMessageText(
     HEADER +
-    `🎁 *Referral Program*\n\n` +
-    `Your Code: \`${code}\`\n\n` +
-    `Share link:\n${APP_URL}?ref=${code}\n\n` +
-    `👥 Referrals: 0\n` +
-    `💰 Earned: $0.00\n\n` +
-    `_Earn rewards for every trader you bring._`,
+      `🎁 *Referral Program*\n\n` +
+      `Your Code: \`${code}\`\n\n` +
+      `👥 Referrals: 0\n` +
+      `💰 Earned: $0\\.00\n\n` +
+      `_Earn rewards for every trader you bring\._`,
     {
-      parse_mode: "Markdown",
-      disable_web_page_preview: true,
+      parse_mode: "MarkdownV2",
+      link_preview_options: { is_disabled: true },
       ...Markup.inlineKeyboard([
         [Markup.button.callback("⬅ Back", "settings:view")],
       ]),
@@ -973,26 +1058,63 @@ bot.action("referral:view", async (ctx) => {
   );
 });
 
-// ── TEXT HANDLER ───────────────────────────────────────────────────────────
+// ── Deposit / Withdraw stubs ───────────────────────────────────────────────
+bot.action("wallet:deposit", async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from?.id!;
+  const s = getState(userId);
+  const addr = s.wallets[s.activeWallet]?.address || "No wallet";
+  await ctx.editMessageText(
+    HEADER +
+      `💸 *Deposit*\n\n` +
+      `Send ETH or tokens to:\n\n\`${addr}\`\n\n` +
+      `Network: Robinhood Chain`,
+    {
+      parse_mode: "MarkdownV2",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("⬅ Back", "portfolio:view")],
+      ]),
+    }
+  );
+});
+
+bot.action("wallet:withdraw", async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(
+    HEADER + `📤 *Withdraw*\n\nOpen the terminal to send funds:`,
+    {
+      parse_mode: "MarkdownV2",
+      ...Markup.inlineKeyboard([
+        [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
+        [Markup.button.callback("⬅ Back", "portfolio:view")],
+      ]),
+    }
+  );
+});
+
+// ── Text Handler ───────────────────────────────────────────────────────────
 bot.on("text", async (ctx) => {
   const userId = ctx.from?.id!;
   const s = getState(userId);
   const text = ctx.message.text.trim();
 
-  // Contract address pasted — show token screen
+  // Contract address — show token screen
   if (text.startsWith("0x") && text.length === 42 && s.step === "idle") {
     await showTokenScreen(ctx, text, false);
     return;
   }
 
-  // Awaiting scan
+  // Scanner
   if (s.step === "awaiting_scan") {
     if (text.startsWith("0x") && text.length === 42) {
       s.step = "idle";
-      await ctx.reply(`🔍 Scanning \`${text}\`...`, { parse_mode: "Markdown" });
+      await ctx.reply(`🔍 Scanning \`${text}\`\.\.\.`, { parse_mode: "MarkdownV2" });
       await runScan(ctx, text, false);
     } else {
-      await ctx.reply("❌ Invalid address. Must start with 0x and be 42 characters.");
+      await ctx.reply(
+        "❌ Invalid address\\. Must start with 0x and be 42 characters\\.",
+        { parse_mode: "MarkdownV2" }
+      );
     }
     return;
   }
@@ -1003,8 +1125,9 @@ bot.on("text", async (ctx) => {
     if (words.length === 12 || words.length === 24) {
       const w = importFromPhrase(text);
       if (w) {
+        const walletNum = s.wallets.length + 1;
         s.wallets.push({
-          name: `Wallet ${s.wallets.length + 1}`,
+          name: `Wallet ${walletNum}`,
           address: w.address,
           encryptedKey: w.privateKey,
         });
@@ -1012,9 +1135,9 @@ bot.on("text", async (ctx) => {
         s.step = "idle";
         await ctx.reply(
           HEADER +
-          `✅ *Wallet Imported!*\n\n📍 \`${w.address}\`\n\nReady to trade.`,
+            `✅ *Wallet Imported\\!*\n\n📍 \`${w.address}\`\n\nReady to trade\.`,
           {
-            parse_mode: "Markdown",
+            parse_mode: "MarkdownV2",
             ...Markup.inlineKeyboard([
               [Markup.button.callback("🏠 Main Menu", "menu:main")],
               [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
@@ -1022,10 +1145,13 @@ bot.on("text", async (ctx) => {
           }
         );
       } else {
-        await ctx.reply("❌ Invalid recovery phrase. Please check and try again.");
+        await ctx.reply(
+          "❌ Invalid recovery phrase\\. Please check and try again\\.",
+          { parse_mode: "MarkdownV2" }
+        );
       }
     } else {
-      await ctx.reply("❌ Must be 12 or 24 words.");
+      await ctx.reply("❌ Must be 12 or 24 words\\.", { parse_mode: "MarkdownV2" });
     }
     return;
   }
@@ -1034,8 +1160,9 @@ bot.on("text", async (ctx) => {
   if (s.step === "awaiting_key") {
     const w = importFromKey(text);
     if (w) {
+      const walletNum = s.wallets.length + 1;
       s.wallets.push({
-        name: `Wallet ${s.wallets.length + 1}`,
+        name: `Wallet ${walletNum}`,
         address: w.address,
         encryptedKey: w.privateKey,
       });
@@ -1043,9 +1170,9 @@ bot.on("text", async (ctx) => {
       s.step = "idle";
       await ctx.reply(
         HEADER +
-        `✅ *Wallet Imported!*\n\n📍 \`${w.address}\`\n\nReady to trade.`,
+          `✅ *Wallet Imported\\!*\n\n📍 \`${w.address}\`\n\nReady to trade\.`,
         {
-          parse_mode: "Markdown",
+          parse_mode: "MarkdownV2",
           ...Markup.inlineKeyboard([
             [Markup.button.callback("🏠 Main Menu", "menu:main")],
             [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
@@ -1053,26 +1180,28 @@ bot.on("text", async (ctx) => {
         }
       );
     } else {
-      await ctx.reply("❌ Invalid private key.");
+      await ctx.reply("❌ Invalid private key\\.", { parse_mode: "MarkdownV2" });
     }
     return;
   }
 
   // Limit price
   if (s.step.startsWith("awaiting_limit_price:")) {
-    const [, type, ca] = s.step.split(":");
+    const parts = s.step.split(":");
+    const type = parts[1];
+    const ca = parts[2];
     const price = parseFloat(text);
     if (!isNaN(price) && price > 0) {
       s.step = "idle";
       await ctx.reply(
         HEADER +
-        `✅ *Limit Order Set*\n\n` +
-        `Type: ${type === "buy" ? "🟢 Buy" : "🔴 Sell"}\n` +
-        `Target Price: $${price}\n` +
-        `Status: Active ⏳\n\n` +
-        `You will be notified when triggered.`,
+          `✅ *Limit Order Set*\n\n` +
+          `Type: ${type === "buy" ? "🟢 Buy" : "🔴 Sell"}\n` +
+          `Target: $${price}\n` +
+          `Status: Active ⏳\n\n` +
+          `You will be notified when triggered\.`,
         {
-          parse_mode: "Markdown",
+          parse_mode: "MarkdownV2",
           ...Markup.inlineKeyboard([
             [Markup.button.callback("🎯 View Orders", "orders:view")],
             [Markup.button.callback("🏠 Menu", "menu:main")],
@@ -1080,7 +1209,10 @@ bot.on("text", async (ctx) => {
         }
       );
     } else {
-      await ctx.reply("❌ Invalid price. Send a number like `0.006`", { parse_mode: "Markdown" });
+      await ctx.reply(
+        "❌ Invalid price\\. Send a number like `0\\.006`",
+        { parse_mode: "MarkdownV2" }
+      );
     }
     return;
   }
