@@ -5,6 +5,7 @@ const CHAIN = "robinhood";
 const BASE = "https://api.dexscreener.com";
 
 function formatNum(n: number): string {
+  if (!n || isNaN(n)) return "N/A";
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -12,6 +13,7 @@ function formatNum(n: number): string {
 }
 
 function getAge(ts: number): string {
+  if (!ts) return "N/A";
   const diff = Date.now() - ts;
   const mins = Math.floor(diff / 60000);
   const hours = Math.floor(mins / 60);
@@ -27,7 +29,7 @@ function formatPair(pair: any) {
     name: pair.baseToken?.name || "Unknown",
     ticker: pair.baseToken?.symbol || "???",
     price: parseFloat(pair.priceUsd || "0"),
-    change: pair.priceChange?.h24 || 0,
+    change: parseFloat(pair.priceChange?.h24 || "0"),
     mcap: pair.marketCap
       ? formatNum(pair.marketCap)
       : pair.fdv
@@ -38,10 +40,10 @@ function formatPair(pair: any) {
     age: pair.pairCreatedAt ? getAge(pair.pairCreatedAt) : "N/A",
     holders: 0,
     verified: false,
-    logo: "",
+    logo: pair.info?.imageUrl || "",
     pairAddress: pair.pairAddress || "",
     dexId: pair.dexId || "",
-    url: pair.url || "",
+    url: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`,
   };
 }
 
@@ -51,7 +53,6 @@ export async function GET(req: NextRequest) {
   const ca = searchParams.get("ca");
 
   try {
-    // Single token by CA
     if (ca) {
       const { data } = await axios.get(
         `${BASE}/latest/dex/tokens/${ca}`,
@@ -63,7 +64,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(formatPair(pair));
     }
 
-    // Search by query
     if (q) {
       const { data } = await axios.get(
         `${BASE}/latest/dex/search?q=${encodeURIComponent(q)}`,
@@ -76,11 +76,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(pairs);
     }
 
-    // Trending — fetch multiple popular searches and merge
-    const queries = ["WETH", "ETH", "USDC", "CAT", "PEPE"];
+    // Fetch trending using multiple terms
+    const queries = [
+      "CASHCAT", "WETH", "TROLL", "PEPE", "CAT",
+      "DOGE", "AI", "BOT", "BASED", "ROBIN",
+    ];
+
     const results = await Promise.allSettled(
-      queries.map((term) =>
-        axios.get(`${BASE}/latest/dex/search?q=${term}`, { timeout: 10000 })
+      queries.map(term =>
+        axios.get(`${BASE}/latest/dex/search?q=${term}`, { timeout: 8000 })
       )
     );
 
@@ -93,7 +97,7 @@ export async function GET(req: NextRequest) {
           .filter((p: any) => p.chainId === CHAIN);
         for (const pair of filtered) {
           const key = pair.pairAddress;
-          if (!seen.has(key)) {
+          if (key && !seen.has(key)) {
             seen.add(key);
             pairs.push(formatPair(pair));
           }
@@ -101,14 +105,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Sort by volume
+    // Sort by 24h volume descending
     pairs.sort((a, b) => {
-      const aVol = parseFloat(a.vol) || 0;
-      const bVol = parseFloat(b.vol) || 0;
-      return bVol - aVol;
+      const aV = parseFloat(a.vol?.replace(/[^0-9.]/g, "") || "0");
+      const bV = parseFloat(b.vol?.replace(/[^0-9.]/g, "") || "0");
+      return bV - aV;
     });
 
-    return NextResponse.json(pairs.slice(0, 50));
+    return NextResponse.json(pairs.slice(0, 60));
   } catch (err) {
     console.error("Market API error:", err);
     return NextResponse.json([], { status: 200 });
