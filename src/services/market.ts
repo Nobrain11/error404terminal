@@ -1,14 +1,17 @@
 import axios from "axios";
 
-const DEXSCREENER_API = "https://api.dexscreener.com/latest/dex";
 const CHAIN = "robinhood";
+const BASE = "https://api.dexscreener.com";
 
 export async function getTrendingTokens() {
   try {
+    // Use search endpoint with chain filter
     const { data } = await axios.get(
-      `${DEXSCREENER_API}/tokens/${CHAIN}`
+      `${BASE}/latest/dex/search?q=ETH`,
+      { headers: { "Accept": "application/json" } }
     );
-    return data.pairs || [];
+    const pairs = data.pairs?.filter((p: any) => p.chainId === CHAIN) || [];
+    return pairs;
   } catch {
     return [];
   }
@@ -17,11 +20,11 @@ export async function getTrendingTokens() {
 export async function getTokenByAddress(ca: string) {
   try {
     const { data } = await axios.get(
-      `${DEXSCREENER_API}/tokens/${ca}`
+      `${BASE}/latest/dex/tokens/${ca}`,
+      { headers: { "Accept": "application/json" } }
     );
-    const pair = data.pairs?.find(
-      (p: any) => p.chainId === CHAIN
-    ) || data.pairs?.[0];
+    const pair = data.pairs?.find((p: any) => p.chainId === CHAIN)
+      || data.pairs?.[0];
     return pair || null;
   } catch {
     return null;
@@ -31,20 +34,10 @@ export async function getTokenByAddress(ca: string) {
 export async function searchTokens(query: string) {
   try {
     const { data } = await axios.get(
-      `${DEXSCREENER_API}/search?q=${encodeURIComponent(query)}`
+      `${BASE}/latest/dex/search?q=${encodeURIComponent(query)}`,
+      { headers: { "Accept": "application/json" } }
     );
     return data.pairs?.filter((p: any) => p.chainId === CHAIN) || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function getTopTokens() {
-  try {
-    const { data } = await axios.get(
-      `https://api.dexscreener.com/token-boosts/top/v1`
-    );
-    return data || [];
   } catch {
     return [];
   }
