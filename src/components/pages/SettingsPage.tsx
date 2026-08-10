@@ -25,43 +25,15 @@ export default function SettingsPage() {
   ]);
 
   function toggleNotif(i: number) {
-    setNotifs(n => n.map((item, j) => j === i ? { ...item, active: !item.active } : item));
+    setNotifs((n) =>
+      n.map((item, j) => (j === i ? { ...item, active: !item.active } : item))
+    );
   }
-
-  const staticSections = [
-    {
-      label: "Wallets",
-      rows: [
-        { label: "Active Wallet", val: "0x3a7f…9b44" },
-        { label: "Add Wallet", val: "" },
-        { label: "Export Private Key", val: "" },
-        { label: "Recovery Phrase", val: "" },
-      ],
-    },
-    {
-      label: "Security",
-      rows: [
-        { label: "PIN Protection", val: "Off" },
-        { label: "Biometrics", val: "Off" },
-        { label: "Session Timeout", val: "30m" },
-        { label: "Transaction Confirm", val: "On" },
-      ],
-    },
-    {
-      label: "App",
-      rows: [
-        { label: "Language", val: "English" },
-        { label: "Theme", val: "Dark" },
-        { label: "Referral Code", val: "E404-XYZ123" },
-        { label: "Version", val: "1.0.0" },
-      ],
-    },
-  ];
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "8px 0 100px", scrollbarWidth: "none" }}>
 
-      {/* Wallets section */}
+      {/* Wallets */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T3, textTransform: "uppercase", letterSpacing: ".07em", padding: "0 18px", marginBottom: 8 }}>
           Wallets
@@ -73,7 +45,7 @@ export default function SettingsPage() {
             { label: "Export Private Key", val: "" },
             { label: "Recovery Phrase", val: "" },
           ].map((r, i, arr) => (
-            <div key={r.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < arr.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none", cursor: "pointer" }}>
+            <div key={r.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < arr.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none", cursor: "pointer" }}>
               <span style={{ flex: 1, fontSize: 13 }}>{r.label}</span>
               {r.val && <span style={{ fontSize: 13, color: T2, marginRight: 6 }}>{r.val}</span>}
               <span style={{ color: T3, fontSize: 12 }}>›</span>
@@ -82,14 +54,13 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Trading section */}
+      {/* Trading */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T3, textTransform: "uppercase", letterSpacing: ".07em", padding: "0 18px", marginBottom: 8 }}>
           Trading
         </div>
         <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, overflow: "hidden", margin: "0 16px" }}>
-          {/* Slippage */}
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid rgba(255,255,255,0.06)` }}>
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
             <div style={{ fontSize: 12, color: T2, marginBottom: 8 }}>Slippage</div>
             <div style={{ display: "flex", gap: 6 }}>
               {["0.1", "0.5", "1.0", "2.0"].map((s) => (
@@ -103,8 +74,7 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
-          {/* Gas */}
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid rgba(255,255,255,0.06)` }}>
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
             <div style={{ fontSize: 12, color: T2, marginBottom: 8 }}>Gas Priority</div>
             <div style={{ display: "flex", gap: 6 }}>
               {["Normal", "Fast", "Turbo"].map((g) => (
@@ -118,7 +88,6 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
-          {/* RPC */}
           <div style={{ padding: "12px 14px" }}>
             <div style={{ fontSize: 12, color: T2, marginBottom: 6 }}>RPC Endpoint</div>
             <input
@@ -135,14 +104,14 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Notifications section */}
+      {/* Notifications */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T3, textTransform: "uppercase", letterSpacing: ".07em", padding: "0 18px", marginBottom: 8 }}>
           Notifications
         </div>
         <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, overflow: "hidden", margin: "0 16px" }}>
           {notifs.map((n, i) => (
-            <div key={n.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < notifs.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none" }}>
+            <div key={n.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < notifs.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none" }}>
               <span style={{ flex: 1, fontSize: 13 }}>{n.label}</span>
               <div
                 onClick={() => toggleNotif(i)}
@@ -165,7 +134,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Security section */}
+      {/* Security */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T3, textTransform: "uppercase", letterSpacing: ".07em", padding: "0 18px", marginBottom: 8 }}>
           Security
@@ -177,7 +146,7 @@ export default function SettingsPage() {
             { label: "Session Timeout", val: "30m" },
             { label: "Transaction Confirm", val: "On" },
           ].map((r, i, arr) => (
-            <div key={r.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < arr.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none", cursor: "pointer" }}>
+            <div key={r.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < arr.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none", cursor: "pointer" }}>
               <span style={{ flex: 1, fontSize: 13 }}>{r.label}</span>
               <span style={{ fontSize: 13, color: T2, marginRight: 6 }}>{r.val}</span>
               <span style={{ color: T3, fontSize: 12 }}>›</span>
@@ -186,7 +155,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* App section */}
+      {/* App */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T3, textTransform: "uppercase", letterSpacing: ".07em", padding: "0 18px", marginBottom: 8 }}>
           App
@@ -198,7 +167,7 @@ export default function SettingsPage() {
             { label: "Referral Code", val: "E404-XYZ123" },
             { label: "Version", val: "1.0.0" },
           ].map((r, i, arr) => (
-            <div key={r.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < arr.length - 1 ? `1px solid rgba(255,255,255,0.06)` : "none", cursor: "pointer" }}>
+            <div key={r.label} style={{ display: "flex", alignItems: "center", padding: "13px 14px", borderBottom: i < arr.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none", cursor: "pointer" }}>
               <span style={{ flex: 1, fontSize: 13 }}>{r.label}</span>
               <span style={{ fontSize: 13, color: T2, marginRight: 6 }}>{r.val}</span>
               <span style={{ color: T3, fontSize: 12 }}>›</span>
