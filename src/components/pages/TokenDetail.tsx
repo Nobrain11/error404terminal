@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createChart, IChartApi, ISeriesApi, UTCTimestamp } from "lightweight-charts";
 import type { Token } from "../Terminal";
 
 const G = "#00C805";
@@ -25,18 +26,87 @@ export default function TokenDetail({
   onTrade: (t: Token, side: "buy" | "sell") => void;
 }) {
   const [tf, setTf] = useState("1H");
-  const pos = token.change > 0;
+  const [livePrice, setLivePrice] = useState(token.price);
+  const [liveChange, setLiveChange] = useState(token.change);
+  const pos = liveChange > 0;
 
-  const points = Array.from({ length: 30 }, (_, i) =>
-    token.price * (1 + Math.sin(i * 0.5) * 0.06 + (pos ? i * 0.001 : -i * 0.001))
-  );
-  const max = Math.max(...points), min = Math.min(...points);
-  const W = 360, H = 90;
-  const pathD = points.map((p, i) => {
-    const x = (i / (points.length - 1)) * W;
-    const y = H - ((p - min) / (max - min || 1)) * H;
-    return `${i === 0 ? "M" : "L"}${x},${y}`;
-  }).join(" ");
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
+
+  // Create chart once
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+
+    const chart = createChart(chartContainerRef.current, {
+      width: chartContainerRef.current.clientWidth,
+      height: 160,
+      layout: {
+        background: { color: "transparent" },
+        textColor: T2,
+        fontSize: 10,
+      },
+      grid: {
+        vertLines: { visible: false },
+        horzLines: { color: "rgba(255,255,255,0.04)" },
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: true,
+        borderColor: B,
+      },
+      rightPriceScale: { borderColor: B },
+      crosshair: { mode: 0 },
+    });
+
+    const series = chart.addAreaSeries({
+      lineColor: pos ? G : R,
+      topColor: pos ? "rgba(0,200,5,0.25)" : "rgba(255,59,48,0.25)",
+      bottomColor: "rgba(0,0,0,0)",
+      lineWidth: 2,
+    });
+
+    // Seed with the initial price so the chart isn't empty on open
+    series.setData([
+      { time: (Math.floor(Date.now() / 1000) - 1) as UTCTimestamp, value: token.price },
+    ]);
+
+    chartRef.current = chart;
+    seriesRef.current = series;
+
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll real price and push new points
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/market/tokens?ca=${token.ca}`);
+        const data = await res.json();
+        if (data?.price) {
+          setLivePrice(data.price);
+          setLiveChange(data.change ?? 0);
+          seriesRef.current?.update({
+            time: Math.floor(Date.now() / 1000) as UTCTimestamp,
+            value: data.price,
+          });
+        }
+      } catch (e) {
+        console.error("price poll failed", e);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [token.ca]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
@@ -52,24 +122,15 @@ export default function TokenDetail({
           <div style={{ fontSize: 11, color: T2, fontFamily: "monospace" }}>{token.ca.slice(0, 10)}…{token.ca.slice(-6)}</div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>${token.price < 0.001 ? token.price.toExponential(2) : token.price.toFixed(4)}</div>
-          <div style={{ fontSize: 11, color: pos ? G : R, fontWeight: 600 }}>{pos ? "+" : ""}{token.change}%</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>${livePrice < 0.001 ? livePrice.toExponential(2) : livePrice.toFixed(4)}</div>
+          <div style={{ fontSize: 11, color: pos ? G : R, fontWeight: 600 }}>{pos ? "+" : ""}{liveChange}%</div>
         </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", scrollbarWidth: "none", padding: "10px 16px 100px" }}>
         {/* Chart */}
         <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 12, marginBottom: 10 }}>
-          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
-            <defs>
-              <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={pos ? G : R} stopOpacity="0.25" />
-                <stop offset="100%" stopColor={pos ? G : R} stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            <path d={`${pathD} L${W},${H} L0,${H} Z`} fill="url(#cg)" />
-            <path d={pathD} fill="none" stroke={pos ? G : R} strokeWidth="1.5" />
-          </svg>
+          <div ref={chartContainerRef} style={{ width: "100%" }} />
           <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
             {["1m", "5m", "15m", "1H", "4H", "1D", "1W"].map(t => (
               <button key={t} onClick={() => setTf(t)} style={{
