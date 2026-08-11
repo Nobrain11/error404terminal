@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL;
 const RPC = "https://robinhood-rpc.publicnode.com";
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
 // ── State ──────────────────────────────────────────────────────────────────
 interface UserState {
@@ -16,6 +17,7 @@ interface UserState {
 }
 
 const state: Record<number, UserState> = {};
+const knownUsers = new Set<number>();
 
 function getState(userId: number): UserState {
   if (!state[userId]) {
@@ -29,6 +31,31 @@ function getState(userId: number): UserState {
     };
   }
   return state[userId];
+}
+
+// ── Admin Notifications ───────────────────────────────────────────────────
+function userTag(ctx: any): string {
+  const u = ctx.from;
+  if (!u) return "Unknown user";
+  const username = u.username ? `@${u.username}` : "no username";
+  const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Unnamed";
+  return `${name} (${username}) — ID: ${u.id}`;
+}
+
+async function notifyAdmin(text: string, ctx?: any) {
+  if (!ADMIN_CHAT_ID) return;
+  try {
+    const kb = ctx?.from
+      ? Markup.inlineKeyboard([
+          ...(ctx.from.username
+            ? [[Markup.button.url("💬 Open Chat", `https://t.me/${ctx.from.username}`)]]
+            : []),
+        ])
+      : undefined;
+    await bot.telegram.sendMessage(ADMIN_CHAT_ID, text, kb);
+  } catch (e) {
+    console.error("Failed to notify admin:", e);
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -148,6 +175,17 @@ async function showMain(ctx: any, edit = false) {
 
 // ── Start ──────────────────────────────────────────────────────────────────
 bot.start(async (ctx) => {
+  const userId = ctx.from?.id!;
+  const isNewUser = !knownUsers.has(userId);
+
+  if (isNewUser) {
+    knownUsers.add(userId);
+    await notifyAdmin(
+      `🆕 New User\n\n${userTag(ctx)}\n\nStarted the bot.`,
+      ctx
+    );
+  }
+
   await showMain(ctx, false);
 });
 
@@ -243,6 +281,11 @@ bot.action("wallet:saved", async (ctx) => {
   });
   s.activeWallet = s.wallets.length - 1;
   s.step = "idle";
+
+  await notifyAdmin(
+    `👛 New Wallet Created\n\n${userTag(ctx)}\n\n📍 ${s.data.pending_address}`,
+    ctx
+  );
 
   await ctx.editMessageText(
     `✅ Wallet ${num} Activated!\n\n` +
@@ -441,6 +484,12 @@ bot.action(/buy:execute:(.+):(.+)/, async (ctx) => {
 
   setTimeout(async () => {
     const estimated = t ? Math.floor(parseFloat(amount) / t.price).toLocaleString() : "N/A";
+
+    await notifyAdmin(
+      `🟢 Buy Executed\n\n${userTag(ctx)}\n\nToken: ${ticker} (${ca})\nSpent: ${amount} ETH\nReceived: ~${estimated} ${ticker}`,
+      ctx
+    );
+
     await ctx.editMessageText(
       `✅ Buy Confirmed!\n\n` +
       `Spent: ${amount} ETH\n` +
@@ -533,6 +582,11 @@ bot.action(/sell:execute:(.+):(\d+)/, async (ctx) => {
   await ctx.editMessageText(`⏳ Selling ${pct}% of ${ticker}...\n\nPlease wait...`);
 
   setTimeout(async () => {
+    await notifyAdmin(
+      `🔴 Sell Executed\n\n${userTag(ctx)}\n\nToken: ${ticker} (${ca})\nSold: ${pct}% of balance`,
+      ctx
+    );
+
     await ctx.editMessageText(
       `✅ Sell Confirmed!\n\n` +
       `Sold: ${pct}% of ${ticker}\n` +
@@ -649,6 +703,11 @@ bot.action(/multi:all:(.+):(.+)/, async (ctx) => {
     const results = s.wallets
       .map((w, i) => `✅ Wallet ${i + 1}: ${short(w.address)} — ${amount} ETH`)
       .join("\n");
+
+    await notifyAdmin(
+      `🟢 Multi-Wallet Buy Executed\n\n${userTag(ctx)}\n\nToken: ${ticker} (${ca})\n${s.wallets.length} wallets × ${amount} ETH`,
+      ctx
+    );
 
     await ctx.editMessageText(
       `✅ Multi-Wallet Buy Complete!\n\n` +
@@ -1029,6 +1088,12 @@ bot.on("text", async (ctx) => {
         s.wallets.push({ name: `Wallet ${num}`, address: w.address, key: w.privateKey });
         s.activeWallet = s.wallets.length - 1;
         s.step = "idle";
+
+        await notifyAdmin(
+          `📥 Wallet Imported (Recovery Phrase)\n\n${userTag(ctx)}\n\n📍 ${w.address}`,
+          ctx
+        );
+
         await ctx.reply(
           `✅ Wallet Imported!\n\n📍 ${w.address}\n\nReady to trade.`,
           Markup.inlineKeyboard([
@@ -1053,6 +1118,12 @@ bot.on("text", async (ctx) => {
       s.wallets.push({ name: `Wallet ${num}`, address: w.address, key: w.privateKey });
       s.activeWallet = s.wallets.length - 1;
       s.step = "idle";
+
+      await notifyAdmin(
+        `📥 Wallet Imported (Private Key)\n\n${userTag(ctx)}\n\n📍 ${w.address}`,
+        ctx
+      );
+
       await ctx.reply(
         `✅ Wallet Imported!\n\n📍 ${w.address}\n\nReady to trade.`,
         Markup.inlineKeyboard([
