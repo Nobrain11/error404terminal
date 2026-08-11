@@ -161,6 +161,7 @@ export default function DiscoverPage({ onSelectToken }: { onSelectToken: (t: Tok
       verified: t.verified || false,
       logo: t.ca,
       ca: t.ca,
+      pairAddress: t.pairAddress,
     };
   }
 
@@ -269,7 +270,6 @@ export default function DiscoverPage({ onSelectToken }: { onSelectToken: (t: Tok
               onMouseEnter={e => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.15)")}
               onMouseLeave={e => (e.currentTarget.style.borderColor = B)}
             >
-              {/* Row 1 */}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                 <TokenImage ticker={t.ticker} url={t.ca} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -299,7 +299,6 @@ export default function DiscoverPage({ onSelectToken }: { onSelectToken: (t: Tok
                 </div>
               </div>
 
-              {/* Row 2 — stats */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 4, marginBottom: 10 }}>
                 {[
                   ["MCap", t.mcap],
@@ -314,7 +313,6 @@ export default function DiscoverPage({ onSelectToken }: { onSelectToken: (t: Tok
                 ))}
               </div>
 
-              {/* Row 3 — actions */}
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   onClick={e => { e.stopPropagation(); onSelectToken(toToken(t, i)); }}
