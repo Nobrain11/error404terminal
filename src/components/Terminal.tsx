@@ -38,6 +38,7 @@ export interface Token {
   verified: boolean;
   logo: string;
   ca: string;
+  pairAddress?: string;
 }
 
 export default function Terminal() {
