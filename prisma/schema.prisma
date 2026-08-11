@@ -144,3 +144,21 @@ model PriceSnapshot {
 
   @@index([tokenCa, timestamp])
 }
+
+model SwapEvent {
+  id          String   @id @default(cuid())
+  pairAddress String
+  tokenCa     String
+  txHash      String
+  logIndex    Int
+  blockNumber Int
+  timestamp   DateTime
+  isBuy       Boolean
+  rawRatio    Float
+  ourAmount   Float
+  otherAmount Float
+  createdAt   DateTime @default(now())
+
+  @@unique([txHash, logIndex])
+  @@index([pairAddress, timestamp])
+}
