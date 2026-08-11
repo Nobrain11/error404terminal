@@ -1,25 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { buyToken } from "@/services/trading";
-import { verifyToken } from "@/lib/jwt";
+import { buyToken, getQuote } from "@/services/trading";
+import { decrypt } from "@/lib/encryption";
 
 export async function POST(req: NextRequest) {
-  const auth = req.headers.get("authorization")?.split(" ")[1];
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const { encryptedKey, tokenAddress, amountEth, slippage } = await req.json();
 
-  const { userId } = verifyToken(auth) as { userId: string };
-  const { walletId, tokenAddress, amountEth, slippage } = await req.json();
+    if (!encryptedKey || !tokenAddress || !amountEth) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
 
-  const wallet = await prisma.wallet.findFirst({ where: { id: walletId, userId } });
-  if (!wallet) return NextResponse.json({ error: "Wallet not found" }, { status: 404 });
+    const privateKey = decrypt(encryptedKey);
 
-  const result = await buyToken({
-    walletId,
-    encryptedKey: wallet.encryptedKey,
-    tokenAddress,
-    amountEth,
-    slippage: slippage || "0.5",
-  });
+    const result = await buyToken({
+      privateKey,
+      tokenAddress,
+      amountEth,
+      slippagePct: parseFloat(slippage || "0.5"),
+    });
 
-  return NextResponse.json(result);
+    return NextResponse.json(result);
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }
