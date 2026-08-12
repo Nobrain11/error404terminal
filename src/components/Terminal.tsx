@@ -78,7 +78,7 @@ export default function Terminal() {
         overflow: "hidden",
       }}>
         <TickerTape />
-        <Header page={page} />
+        <Header page={page} onNavigate={setPage} />
 
         {selectedToken ? (
           <TokenDetail
