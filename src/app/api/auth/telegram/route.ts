@@ -1,22 +1,60 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { signToken, signRefresh } from "@/lib/jwt";
+import crypto from "crypto";
 
-export async function POST(req: NextRequest) {
-  const { telegramId, username } = await req.json();
+interface TelegramUser {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+}
 
-  if (!telegramId) {
-    return NextResponse.json({ error: "Missing telegramId" }, { status: 400 });
+interface VerifiedInitData {
+  user: TelegramUser;
+  authDate: number;
+}
+
+const MAX_AUTH_AGE_SECONDS = 86400; // 24h
+
+export function verifyTelegramInitData(initData: string): VerifiedInitData | null {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken || !initData) return null;
+
+  try {
+    const params = new URLSearchParams(initData);
+    const hash = params.get("hash");
+    if (!hash) return null;
+    params.delete("hash");
+
+    const dataCheckArr: string[] = [];
+    params.forEach((value, key) => {
+      dataCheckArr.push(`${key}=${value}`);
+    });
+    dataCheckArr.sort();
+    const dataCheckString = dataCheckArr.join("\n");
+
+    const secretKey = crypto
+      .createHmac("sha256", "WebAppData")
+      .update(botToken)
+      .digest();
+
+    const computedHash = crypto
+      .createHmac("sha256", secretKey)
+      .update(dataCheckString)
+      .digest("hex");
+
+    if (computedHash !== hash) return null;
+
+    const authDate = parseInt(params.get("auth_date") || "0", 10);
+    const now = Math.floor(Date.now() / 1000);
+    if (!authDate || now - authDate > MAX_AUTH_AGE_SECONDS) return null;
+
+    const userRaw = params.get("user");
+    if (!userRaw) return null;
+    const user: TelegramUser = JSON.parse(userRaw);
+
+    return { user, authDate };
+  } catch (e) {
+    console.error("Telegram initData verification failed:", e);
+    return null;
   }
-
-  const user = await prisma.user.upsert({
-    where: { telegramId: String(telegramId) },
-    update: { username },
-    create: { telegramId: String(telegramId), username },
-  });
-
-  const token = signToken({ userId: user.id });
-  const refresh = signRefresh({ userId: user.id });
-
-  return NextResponse.json({ token, refresh, user });
 }
