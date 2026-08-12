@@ -1,119 +1,164 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ethers } from "ethers";
 
-const RPC_URL = process.env.RPC_URL || "https://rpc.robinhoodchain.com";
+const CHAIN = "robinhood";
+const BASE = "https://api.dexscreener.com";
 
-const PAIR_ABI = [
-  "function token0() view returns (address)",
-  "function token1() view returns (address)",
-  "event Swap(address indexed sender, uint amount0In, uint amount1In, uint amount0Out, uint amount1Out, address indexed to)",
-];
+function formatNum(n: number): string {
+  if (!n || isNaN(n)) return "N/A";
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return `${n.toFixed(2)}`;
+}
 
-const ERC20_ABI = [
-  "function decimals() view returns (uint8)",
-  "function totalSupply() view returns (uint256)",
-];
+function getAge(ts: number): string {
+  if (!ts) return "N/A";
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d`;
+  if (hours > 0) return `${hours}h`;
+  if (mins > 0) return `${mins}m`;
+  return "new";
+}
+
+function formatPair(pair: any) {
+  return {
+    ca: pair.baseToken?.address || "",
+    name: pair.baseToken?.name || "Unknown",
+    ticker: pair.baseToken?.symbol || "???",
+    price: parseFloat(pair.priceUsd || "0"),
+    priceFormatted: formatPrice(parseFloat(pair.priceUsd || "0")),
+    change5m: parseFloat(pair.priceChange?.m5 || "0"),
+    change1h: parseFloat(pair.priceChange?.h1 || "0"),
+    change6h: parseFloat(pair.priceChange?.h6 || "0"),
+    change24h: parseFloat(pair.priceChange?.h24 || "0"),
+    mcap: pair.marketCap || pair.fdv || 0,
+    mcapFormatted: formatNum(pair.marketCap || pair.fdv || 0),
+    liq: pair.liquidity?.usd || 0,
+    liqFormatted: formatNum(pair.liquidity?.usd || 0),
+    vol24h: pair.volume?.h24 || 0,
+    vol1h: pair.volume?.h1 || 0,
+    volFormatted: formatNum(pair.volume?.h24 || 0),
+    buys24h: pair.txns?.h24?.buys || 0,
+    sells24h: pair.txns?.h24?.sells || 0,
+    age: getAge(pair.pairCreatedAt),
+    ageMs: pair.pairCreatedAt || 0,
+    source: pair.dexId || "unknown",
+    imageUrl: pair.info?.imageUrl || "",
+    website: pair.info?.websites?.[0]?.url || "",
+    telegram: pair.info?.socials?.find((s: any) => s.type === "telegram")?.url || "",
+    twitter: pair.info?.socials?.find((s: any) => s.type === "twitter")?.url || "",
+    pairAddress: pair.pairAddress || "",
+    dexId: pair.dexId || "",
+    dexUrl: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`,
+    trendingScore: 0,
+  };
+}
+
+function formatPrice(p: number): string {
+  if (!p || isNaN(p)) return "$0";
+  if (p < 0.000001) return `$${p.toExponential(2)}`;
+  if (p < 0.001) return `$${p.toFixed(8)}`;
+  if (p < 1) return `$${p.toFixed(6)}`;
+  if (p >= 1000) return `$${p.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return `$${p.toFixed(4)}`;
+}
+
+async function dexSearch(query: string): Promise<any[]> {
+  try {
+    const res = await fetch(
+      `${BASE}/latest/dex/search?q=${encodeURIComponent(query)}`,
+      {
+        headers: { "Accept": "application/json" },
+        next: { revalidate: 15 },
+      }
+    );
+    const data = await res.json();
+    return (data.pairs || []).filter((p: any) => p.chainId === CHAIN);
+  } catch {
+    return [];
+  }
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const pairAddress = searchParams.get("pairAddress");
-  const tokenAddress = searchParams.get("ca");
-  const price = parseFloat(searchParams.get("price") || "0");
-  const sideFilter = searchParams.get("side"); // "buy" | "sell" | null
-  const walletFilter = searchParams.get("wallet")?.toLowerCase();
-  const minSize = parseFloat(searchParams.get("minSize") || "0");
-
-  if (!pairAddress || !tokenAddress) {
-    return NextResponse.json({ error: "Missing pairAddress or ca" }, { status: 400 });
-  }
+  const q = searchParams.get("q");
+  const ca = searchParams.get("ca");
+  const sort = searchParams.get("sort") || "trending";
 
   try {
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const pair = new ethers.Contract(pairAddress, PAIR_ABI, provider);
+    // Single token by CA
+    if (ca) {
+      const res = await fetch(`${BASE}/latest/dex/tokens/${ca}`);
+      const data = await res.json();
+      const pair = (data.pairs || []).find((p: any) => p.chainId === CHAIN)
+        || data.pairs?.[0];
+      if (!pair) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json(formatPair(pair));
+    }
 
-    const [token0, token1] = await Promise.all([pair.token0(), pair.token1()]);
-    const isToken0 = token0.toLowerCase() === tokenAddress.toLowerCase();
-    const targetAddress = isToken0 ? token0 : token1;
+    // Search
+    if (q) {
+      const pairs = await dexSearch(q);
+      return NextResponse.json(pairs.slice(0, 30).map(formatPair));
+    }
 
-    const targetContract = new ethers.Contract(targetAddress, ERC20_ABI, provider);
-    const [decimals, totalSupplyRaw] = await Promise.all([
-      targetContract.decimals(),
-      targetContract.totalSupply().catch(() => null),
-    ]);
-    const supplyHuman = totalSupplyRaw ? parseFloat(ethers.formatUnits(totalSupplyRaw, decimals)) : null;
+    // Trending — fetch multiple queries in parallel
+    const QUERIES = [
+      "CASHCAT", "PONS", "WETH", "FLAP",
+      "CAT", "PEPE", "DOGE", "HOOD",
+      "ROBIN", "MEME", "AI", "BASED",
+      "INU", "FUN", "MOON",
+    ];
 
-    const latestBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, latestBlock - 3000);
-
-    const filter = pair.filters.Swap();
-    const logs = await pair.queryFilter(filter, fromBlock, latestBlock);
-
-    let buyCount = 0, sellCount = 0, buyVolumeUsd = 0, sellVolumeUsd = 0;
-
-    const allParsed = logs.map((log: any) => {
-      const { amount0In, amount1In, amount0Out, amount1Out } = log.args;
-      const isBuy = isToken0 ? amount0Out > 0n : amount1Out > 0n;
-      const rawAmount = isToken0
-        ? (amount0Out > 0n ? amount0Out : amount0In)
-        : (amount1Out > 0n ? amount1Out : amount1In);
-      const amount = parseFloat(ethers.formatUnits(rawAmount, decimals));
-      const usdValue = amount * price;
-
-      if (isBuy) { buyCount++; buyVolumeUsd += usdValue; }
-      else { sellCount++; sellVolumeUsd += usdValue; }
-
-      return { log, isBuy, usdValue };
-    });
-
-    const totalVolume = buyVolumeUsd + sellVolumeUsd;
-    const buyPressure = totalVolume > 0 ? (buyVolumeUsd / totalVolume) * 100 : 50;
-
-    let filtered = allParsed;
-    if (sideFilter === "buy") filtered = filtered.filter(t => t.isBuy);
-    if (sideFilter === "sell") filtered = filtered.filter(t => !t.isBuy);
-    if (minSize > 0) filtered = filtered.filter(t => t.usdValue >= minSize);
-
-    const recent = filtered.slice(-30).reverse();
-
-    const results = await Promise.all(
-      recent.map(async ({ log, isBuy, usdValue }: any) => {
-        const [block, tx] = await Promise.all([
-          provider.getBlock(log.blockNumber),
-          provider.getTransaction(log.transactionHash),
-        ]);
-
-        const walletAddr = (tx?.from || "0x0000000000000000000000000000000000000000").toLowerCase();
-
-        if (walletFilter && walletAddr !== walletFilter) return null;
-
-        const secondsAgo = Math.max(0, Math.floor(Date.now() / 1000) - (block?.timestamp || 0));
-        const ago = secondsAgo < 60
-          ? `${secondsAgo}s`
-          : secondsAgo < 3600
-          ? `${Math.floor(secondsAgo / 60)}m`
-          : `${Math.floor(secondsAgo / 3600)}h`;
-
-        const mcapUsd = supplyHuman !== null ? price * supplyHuman : null;
-
-        return {
-          type: isBuy ? "buy" : "sell",
-          wallet: `${walletAddr.slice(0, 6)}…${walletAddr.slice(-4)}`,
-          walletFull: walletAddr,
-          amount: `$${usdValue >= 1000 ? (usdValue / 1000).toFixed(1) + "K" : usdValue.toFixed(0)}`,
-          amountUsd: usdValue,
-          mcap: mcapUsd !== null ? (mcapUsd >= 1_000_000 ? `$${(mcapUsd / 1_000_000).toFixed(2)}M` : `$${(mcapUsd / 1000).toFixed(1)}K`) : "N/A",
-          ago,
-          txHash: log.transactionHash,
-        };
-      })
+    const results = await Promise.allSettled(
+      QUERIES.map((q) => dexSearch(q))
     );
 
-    return NextResponse.json({
-      trades: results.filter(Boolean),
-      stats: { buyCount, sellCount, buyVolumeUsd, sellVolumeUsd, buyPressure },
-    });
+    const seen = new Set<string>();
+    const pairs: any[] = [];
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        for (const pair of result.value) {
+          const key = pair.pairAddress;
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            pairs.push(pair);
+          }
+        }
+      }
+    }
+
+    // Sort based on requested sort
+    let sorted = [...pairs];
+    if (sort === "new") {
+      sorted.sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0));
+    } else if (sort === "volume") {
+      sorted.sort((a, b) => (b.volume?.h24 || 0) - (a.volume?.h24 || 0));
+    } else if (sort === "gainers") {
+      sorted.sort((a, b) => (parseFloat(b.priceChange?.h24 || "0")) - (parseFloat(a.priceChange?.h24 || "0")));
+    } else if (sort === "losers") {
+      sorted.sort((a, b) => (parseFloat(a.priceChange?.h24 || "0")) - (parseFloat(b.priceChange?.h24 || "0")));
+    } else {
+      // trending — score by volume + buys + recency
+      sorted.sort((a, b) => {
+        const scoreA = (a.volume?.h24 || 0) + (a.txns?.h24?.buys || 0) * 100;
+        const scoreB = (b.volume?.h24 || 0) + (b.txns?.h24?.buys || 0) * 100;
+        return scoreB - scoreA;
+      });
+    }
+
+    return NextResponse.json(
+      sorted
+        .filter((p) => (p.liquidity?.usd || 0) > 500)
+        .slice(0, 60)
+        .map(formatPair)
+    );
   } catch (err) {
-    console.error("Transaction fetch error:", err);
-    return NextResponse.json({ trades: [], stats: null }, { status: 200 });
+    console.error("Market API error:", err);
+    return NextResponse.json([], { status: 200 });
   }
 }
