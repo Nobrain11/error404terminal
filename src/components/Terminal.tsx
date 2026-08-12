@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Script from "next/script";
 import DiscoverPage from "./pages/DiscoverPage";
 import TradePage from "./pages/TradePage";
 import ScannerPage from "./pages/ScannerPage";
@@ -13,6 +14,7 @@ import Header from "./ui/Header";
 import TickerTape from "./ui/TickerTape";
 import RobinBot from "./ui/RobinBot";
 import TokenDetail from "./pages/TokenDetail";
+import { AuthProvider } from "@/lib/auth-context";
 
 export type Page =
   | "discover"
@@ -63,40 +65,43 @@ export default function Terminal() {
   }
 
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      height: "100vh",
-      background: "#0a0a0b",
-      maxWidth: 430,
-      margin: "0 auto",
-      position: "relative",
-      overflow: "hidden",
-    }}>
-      <TickerTape />
-      <Header page={page} />
+    <AuthProvider>
+      <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        background: "#0a0a0b",
+        maxWidth: 430,
+        margin: "0 auto",
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        <TickerTape />
+        <Header page={page} />
 
-      {selectedToken ? (
-        <TokenDetail
-          token={selectedToken}
-          onBack={handleBack}
-          onTrade={handleTrade}
-        />
-      ) : (
-        <>
-          {page === "discover" && <DiscoverPage onSelectToken={handleSelectToken} />}
-          {page === "trade" && <TradePage token={tradeToken} side={tradeSide} />}
-          {page === "scanner" && <ScannerPage />}
-          {page === "portfolio" && <PortfolioPage />}
-          {page === "orders" && <OrdersPage />}
-          {page === "tracking" && <TrackingPage />}
-          {page === "referral" && <ReferralPage />}
-          {page === "settings" && <SettingsPage />}
-        </>
-      )}
+        {selectedToken ? (
+          <TokenDetail
+            token={selectedToken}
+            onBack={handleBack}
+            onTrade={handleTrade}
+          />
+        ) : (
+          <>
+            {page === "discover" && <DiscoverPage onSelectToken={handleSelectToken} />}
+            {page === "trade" && <TradePage token={tradeToken} side={tradeSide} />}
+            {page === "scanner" && <ScannerPage />}
+            {page === "portfolio" && <PortfolioPage />}
+            {page === "orders" && <OrdersPage />}
+            {page === "tracking" && <TrackingPage />}
+            {page === "referral" && <ReferralPage />}
+            {page === "settings" && <SettingsPage />}
+          </>
+        )}
 
-      <RobinBot />
-      <BottomNav current={page} onChange={(p) => { setPage(p); setSelectedToken(null); }} />
-    </div>
+        <RobinBot />
+        <BottomNav current={page} onChange={(p) => { setPage(p); setSelectedToken(null); }} />
+      </div>
+    </AuthProvider>
   );
 }
