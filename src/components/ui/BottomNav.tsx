@@ -5,13 +5,6 @@ const ITEMS = [
   { id: "trade", icon: "⚡", label: "Trade" },
   { id: "scanner", icon: "🛡", label: "Scanner" },
   { id: "portfolio", icon: "💼", label: "Portfolio" },
-  { id: "orders", icon: "📊", label: "Orders" },
-] as const;
-
-const MORE = [
-  { id: "tracking", icon: "⭐", label: "Tracking" },
-  { id: "referral", icon: "👥", label: "Referral" },
-  { id: "settings", icon: "⚙️", label: "Settings" },
 ] as const;
 
 export default function BottomNav({
@@ -21,8 +14,6 @@ export default function BottomNav({
   current: Page;
   onChange: (p: Page) => void;
 }) {
-  const allItems = [...ITEMS, ...MORE];
-
   return (
     <div style={{
       position: "absolute",
@@ -35,21 +26,18 @@ export default function BottomNav({
       display: "flex",
       padding: "6px 4px 8px",
       zIndex: 100,
-      overflowX: "auto",
-      scrollbarWidth: "none",
     }}>
-      {allItems.map((n) => (
+      {ITEMS.map((n) => (
         <button
           key={n.id}
           onClick={() => onChange(n.id as Page)}
           style={{
-            flex: "0 0 auto",
-            minWidth: 52,
+            flex: 1,
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             gap: 2,
-            padding: "4px 6px",
+            padding: "6px 4px",
             borderRadius: 10,
             cursor: "pointer",
             border: "none",
