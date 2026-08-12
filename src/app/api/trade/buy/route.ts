@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buyToken, getQuote } from "@/services/trading";
+import { buyToken } from "@/services/trading";
 import { decrypt } from "@/lib/encryption";
 
 export async function POST(req: NextRequest) {
