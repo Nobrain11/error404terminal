@@ -17,7 +17,9 @@ interface AuthContextValue {
   user: AuthUser | null;
   wallet: AuthWallet | null;
   status: "idle" | "connecting" | "connected" | "unavailable";
+  error: string | null;
   connect: () => Promise<void>;
+  connectWithCode: (code: string) => Promise<boolean>;
   disconnect: () => void;
 }
 
@@ -26,7 +28,9 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   wallet: null,
   status: "idle",
+  error: null,
   connect: async () => {},
+  connectWithCode: async () => false,
   disconnect: () => {},
 });
 
@@ -51,6 +55,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [wallet, setWallet] = useState<AuthWallet | null>(null);
   const [status, setStatus] = useState<AuthContextValue["status"]>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const applySession = (data: any) => {
+    setToken(data.token);
+    setUser(data.user);
+    setWallet(data.wallet);
+    setStatus("connected");
+    localStorage.setItem("token", data.token);
+  };
 
   const connect = useCallback(async () => {
     const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : undefined;
@@ -61,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setStatus("connecting");
+    setError(null);
     try {
       const res = await fetch("/api/auth/telegram", {
         method: "POST",
@@ -72,14 +86,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const data = await res.json();
-      setToken(data.token);
-      setUser(data.user);
-      setWallet(data.wallet);
-      setStatus("connected");
-      localStorage.setItem("token", data.token);
+      applySession(data);
     } catch (e) {
       console.error("Telegram connect failed", e);
       setStatus("unavailable");
+    }
+  }, []);
+
+  const connectWithCode = useCallback(async (code: string) => {
+    setStatus("connecting");
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Invalid code");
+        setStatus("unavailable");
+        return false;
+      }
+      applySession(data);
+      return true;
+    } catch (e) {
+      console.error("Code connect failed", e);
+      setError("Network error");
+      setStatus("unavailable");
+      return false;
     }
   }, []);
 
@@ -91,18 +126,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("token");
   }, []);
 
-  // Runs after initial render — never blocks page load
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.ready();
       tg.expand();
       connect();
+    } else {
+      setStatus("unavailable");
     }
   }, [connect]);
 
   return (
-    <AuthContext.Provider value={{ token, user, wallet, status, connect, disconnect }}>
+    <AuthContext.Provider value={{ token, user, wallet, status, error, connect, connectWithCode, disconnect }}>
       {children}
     </AuthContext.Provider>
   );
