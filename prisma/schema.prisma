@@ -7,6 +7,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ====== LOGIN CODE MODEL (ADDED) ======
+model LoginCode {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  telegramId String
+  used       Boolean  @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+}
+
+// ====== REST OF YOUR MODELS (UNCHANGED) ======
 model User {
   id          String   @id @default(cuid())
   telegramId  String   @unique
