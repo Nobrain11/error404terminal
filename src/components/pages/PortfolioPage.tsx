@@ -10,14 +10,17 @@ const T2 = "#8e8e93";
 const T3 = "#48484a";
 
 const TABS = ["Holdings", "PnL", "History", "Wallets"];
+const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "";
 
 export default function PortfolioPage() {
-  const { wallet, status, connect, disconnect } = useAuth();
+  const { wallet, status, error, connectWithCode, disconnect } = useAuth();
   const [tab, setTab] = useState("Holdings");
   const [inputAddr, setInputAddr] = useState("");
   const [watchAddress, setWatchAddress] = useState("");
   const [balance, setBalance] = useState<any>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  const [submittingCode, setSubmittingCode] = useState(false);
 
   const activeAddress = watchAddress || wallet?.address || "";
 
@@ -35,21 +38,24 @@ export default function PortfolioPage() {
     }
   }
 
-  // Auto-fetch as soon as we have a connected wallet — no manual step needed
   useEffect(() => {
-    if (activeAddress) {
-      fetchBalance(activeAddress);
-    } else {
-      setBalance(null);
-    }
+    if (activeAddress) fetchBalance(activeAddress);
+    else setBalance(null);
   }, [activeAddress]);
+
+  async function handleCodeSubmit() {
+    if (!codeInput.trim()) return;
+    setSubmittingCode(true);
+    const ok = await connectWithCode(codeInput.trim());
+    setSubmittingCode(false);
+    if (ok) setCodeInput("");
+  }
 
   const displayUsd = balance?.balanceUsd ?? "0.00";
   const displayEth = balance?.balance ? parseFloat(balance.balance).toFixed(6) : "0.000000";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
-      {/* Header — always shows a balance, starting at $0 */}
       <div style={{ padding: "12px 16px", flexShrink: 0 }}>
         <div style={{ textAlign: "center", paddingBottom: 12 }}>
           {activeAddress ? (
@@ -81,21 +87,51 @@ export default function PortfolioPage() {
           <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Connect Wallet</div>
             <div style={{ fontSize: 11, color: T2, marginBottom: 10 }}>
-              {status === "unavailable"
-                ? "Open this terminal from the Telegram bot to connect automatically."
-                : "Login with Telegram to view your positions, PnL, and trade history."}
+              Login with Telegram to view your positions, PnL, and trade history.
             </div>
-            <button
-              onClick={connect}
-              disabled={status === "connecting"}
-              style={{
-                width: "100%", padding: 12, borderRadius: 10,
-                border: "none", background: G, color: "#000",
-                fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: 10,
-              }}
-            >
-              {status === "connecting" ? "Connecting…" : "Connect with Telegram"}
-            </button>
+
+            {BOT_USERNAME && (
+              <a
+                href={`https://t.me/${BOT_USERNAME}?start=link`}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  display: "block", textAlign: "center", padding: 12, marginBottom: 10,
+                  background: G, color: "#000", borderRadius: 10,
+                  fontSize: 13, fontWeight: 700, textDecoration: "none",
+                }}
+              >
+                💬 Connect with Telegram
+              </a>
+            )}
+
+            <div style={{ fontSize: 10, color: T3, textAlign: "center", marginBottom: 8 }}>
+              or send /link to the bot and enter your code
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <input
+                value={codeInput}
+                onChange={e => setCodeInput(e.target.value.toUpperCase())}
+                placeholder="Login code"
+                style={{
+                  flex: 1, background: "rgba(255,255,255,0.03)", border: `1px solid ${B}`,
+                  borderRadius: 10, padding: "9px 10px", fontSize: 11, color: "#f2f2f7",
+                  outline: "none", fontFamily: "monospace", textTransform: "uppercase",
+                }}
+              />
+              <button
+                onClick={handleCodeSubmit}
+                disabled={submittingCode || !codeInput.trim()}
+                style={{
+                  padding: "9px 14px", borderRadius: 10, border: "none",
+                  background: G, color: "#000", fontSize: 11, fontWeight: 700,
+                  cursor: submittingCode ? "default" : "pointer",
+                }}
+              >
+                {submittingCode ? "…" : "Connect"}
+              </button>
+            </div>
+            {error && <div style={{ fontSize: 10, color: R, marginBottom: 8 }}>{error}</div>}
 
             <div style={{ fontSize: 10, color: T3, textAlign: "center", marginBottom: 8 }}>or view any address</div>
             <div style={{ display: "flex", gap: 6 }}>
@@ -155,7 +191,6 @@ export default function PortfolioPage() {
         )}
       </div>
 
-      {/* Tabs */}
       <div style={{ display: "flex", gap: 4, padding: "0 16px 8px", overflowX: "auto", scrollbarWidth: "none", flexShrink: 0 }}>
         {TABS.map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
