@@ -11,6 +11,15 @@ function formatNum(n: number): string {
   return `${n.toFixed(2)}`;
 }
 
+function formatPrice(p: number): string {
+  if (!p || isNaN(p)) return "$0";
+  if (p < 0.000001) return `$${p.toExponential(2)}`;
+  if (p < 0.001) return `$${p.toFixed(8)}`;
+  if (p < 1) return `$${p.toFixed(6)}`;
+  if (p >= 1000) return `$${p.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return `$${p.toFixed(4)}`;
+}
+
 function getAge(ts: number): string {
   if (!ts) return "N/A";
   const diff = Date.now() - ts;
@@ -53,17 +62,32 @@ function formatPair(pair: any) {
     pairAddress: pair.pairAddress || "",
     dexId: pair.dexId || "",
     dexUrl: pair.url || `https://dexscreener.com/robinhood/${pair.pairAddress}`,
-    trendingScore: 0,
   };
 }
 
-function formatPrice(p: number): string {
-  if (!p || isNaN(p)) return "$0";
-  if (p < 0.000001) return `$${p.toExponential(2)}`;
-  if (p < 0.001) return `$${p.toFixed(8)}`;
-  if (p < 1) return `$${p.toFixed(6)}`;
-  if (p >= 1000) return `$${p.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-  return `$${p.toFixed(4)}`;
+function trendingScore(pair: any): number {
+  const vol24 = pair.volume?.h24 || 0;
+  const vol1h = pair.volume?.h1 || 0;
+  const buys24 = pair.txns?.h24?.buys || 0;
+  const sells24 = pair.txns?.h24?.sells || 0;
+  const change24 = parseFloat(pair.priceChange?.h24 || "0");
+  const liq = pair.liquidity?.usd || 0;
+  const ageHours = pair.pairCreatedAt
+    ? (Date.now() - pair.pairCreatedAt) / 3600000
+    : 9999;
+
+  // Penalize tokens older than 30 days heavily
+  const recency = Math.max(0, 200 - ageHours * 0.5);
+  // Reward recent volume more
+  const volScore = vol1h * 5 + vol24 * 0.3;
+  // Reward buying pressure
+  const buyScore = buys24 * 20;
+  // Reward positive momentum
+  const momentumScore = change24 > 0 ? change24 * 3 : 0;
+  // Liquidity health
+  const liqScore = Math.min(liq / 1000, 100);
+
+  return volScore + buyScore + momentumScore + recency + liqScore;
 }
 
 async function dexSearch(query: string): Promise<any[]> {
@@ -72,15 +96,37 @@ async function dexSearch(query: string): Promise<any[]> {
       `${BASE}/latest/dex/search?q=${encodeURIComponent(query)}`,
       {
         headers: { "Accept": "application/json" },
-        next: { revalidate: 15 },
+        next: { revalidate: 20 },
       }
     );
     const data = await res.json();
-    return (data.pairs || []).filter((p: any) => p.chainId === CHAIN);
+    return (data.pairs || []).filter(
+      (p: any) => p.chainId === CHAIN && (p.liquidity?.usd || 0) > 500
+    );
   } catch {
     return [];
   }
 }
+
+// Use generic broad queries to get diverse results
+// Avoid specific token names so one token doesn't dominate
+const TRENDING_QUERIES = [
+  "robinhood",
+  "hood",
+  "token",
+  "coin",
+  "swap",
+  "fun",
+  "inu",
+  "ai",
+  "pepe",
+  "cat",
+  "dog",
+  "moon",
+  "based",
+  "meme",
+  "flap",
+];
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -91,7 +137,10 @@ export async function GET(req: NextRequest) {
   try {
     // Single token by CA
     if (ca) {
-      const res = await fetch(`${BASE}/latest/dex/tokens/${ca}`);
+      const res = await fetch(
+        `${BASE}/latest/dex/tokens/${ca}`,
+        { headers: { "Accept": "application/json" } }
+      );
       const data = await res.json();
       const pair = (data.pairs || []).find((p: any) => p.chainId === CHAIN)
         || data.pairs?.[0];
@@ -99,64 +148,64 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(formatPair(pair));
     }
 
-    // Search
+    // Search by query
     if (q) {
       const pairs = await dexSearch(q);
       return NextResponse.json(pairs.slice(0, 30).map(formatPair));
     }
 
-    // Trending — fetch multiple queries in parallel
-    const QUERIES = [
-      "CASHCAT", "PONS", "WETH", "FLAP",
-      "CAT", "PEPE", "DOGE", "HOOD",
-      "ROBIN", "MEME", "AI", "BASED",
-      "INU", "FUN", "MOON",
-    ];
-
+    // Fetch trending with broad queries
     const results = await Promise.allSettled(
-      QUERIES.map((q) => dexSearch(q))
+      TRENDING_QUERIES.map((q) => dexSearch(q))
     );
 
+    // Deduplicate by pair address
     const seen = new Set<string>();
+    // Also track how many times each base token appears
+    const tokenCount = new Map<string, number>();
     const pairs: any[] = [];
 
     for (const result of results) {
       if (result.status === "fulfilled") {
         for (const pair of result.value) {
-          const key = pair.pairAddress;
-          if (key && !seen.has(key)) {
-            seen.add(key);
-            pairs.push(pair);
-          }
+          const pairKey = pair.pairAddress;
+          const tokenKey = pair.baseToken?.address?.toLowerCase();
+
+          if (!pairKey || seen.has(pairKey)) continue;
+
+          // Limit same token to max 1 pair (best liquidity one)
+          const count = tokenCount.get(tokenKey) || 0;
+          if (count >= 1) continue;
+
+          seen.add(pairKey);
+          tokenCount.set(tokenKey, count + 1);
+          pairs.push(pair);
         }
       }
     }
 
-    // Sort based on requested sort
+    // Sort
     let sorted = [...pairs];
+
     if (sort === "new") {
       sorted.sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0));
     } else if (sort === "volume") {
       sorted.sort((a, b) => (b.volume?.h24 || 0) - (a.volume?.h24 || 0));
     } else if (sort === "gainers") {
-      sorted.sort((a, b) => (parseFloat(b.priceChange?.h24 || "0")) - (parseFloat(a.priceChange?.h24 || "0")));
+      sorted.sort((a, b) =>
+        parseFloat(b.priceChange?.h24 || "0") - parseFloat(a.priceChange?.h24 || "0")
+      );
     } else if (sort === "losers") {
-      sorted.sort((a, b) => (parseFloat(a.priceChange?.h24 || "0")) - (parseFloat(b.priceChange?.h24 || "0")));
+      sorted.sort((a, b) =>
+        parseFloat(a.priceChange?.h24 || "0") - parseFloat(b.priceChange?.h24 || "0")
+      );
     } else {
-      // trending — score by volume + buys + recency
-      sorted.sort((a, b) => {
-        const scoreA = (a.volume?.h24 || 0) + (a.txns?.h24?.buys || 0) * 100;
-        const scoreB = (b.volume?.h24 || 0) + (b.txns?.h24?.buys || 0) * 100;
-        return scoreB - scoreA;
-      });
+      // Trending — use scoring formula
+      sorted.sort((a, b) => trendingScore(b) - trendingScore(a));
     }
 
-    return NextResponse.json(
-      sorted
-        .filter((p) => (p.liquidity?.usd || 0) > 500)
-        .slice(0, 60)
-        .map(formatPair)
-    );
+    return NextResponse.json(sorted.slice(0, 60).map(formatPair));
+
   } catch (err) {
     console.error("Market API error:", err);
     return NextResponse.json([], { status: 200 });
