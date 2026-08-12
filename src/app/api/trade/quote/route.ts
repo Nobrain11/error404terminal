@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getQuote, getTokenBalance, getEthBalance } from "@/services/trading";
+import { getBuyQuote, getEthBalance, getTokenBalance } from "@/services/trading";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const [quote, ethBalance, tokenBalance] = await Promise.all([
-      getQuote(token, amount),
+      getBuyQuote(token, amount),
       wallet ? getEthBalance(wallet) : Promise.resolve("0"),
       wallet ? getTokenBalance(token, wallet) : Promise.resolve({ formatted: "0", raw: 0n, decimals: 18 }),
     ]);
