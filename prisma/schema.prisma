@@ -7,7 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ====== LOGIN CODE MODEL (ADDED) ======
+// ====== LOGIN CODE MODEL (legacy — unused now that Telegram login is removed, safe to leave) ======
 model LoginCode {
   id         String   @id @default(cuid())
   code       String   @unique
@@ -17,10 +17,9 @@ model LoginCode {
   createdAt  DateTime @default(now())
 }
 
-// ====== REST OF YOUR MODELS (UNCHANGED) ======
 model User {
   id          String   @id @default(cuid())
-  telegramId  String   @unique
+  telegramId  String?  @unique
   username    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -39,7 +38,7 @@ model Wallet {
   userId          String
   name            String   @default("Wallet 1")
   address         String   @unique
-  encryptedKey    String
+  encryptedKey    String?
   encryptedPhrase String?
   isDefault       Boolean  @default(false)
   createdAt       DateTime @default(now())
@@ -47,6 +46,18 @@ model Wallet {
   user         User          @relation(fields: [userId], references: [id])
   transactions Transaction[]
   portfolio    Portfolio[]
+}
+
+// New — short-lived signing challenge for wallet-connect login (prevents replay attacks)
+model WalletNonce {
+  id        String   @id @default(cuid())
+  address   String
+  nonce     String   @unique
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([address])
 }
 
 model Session {
