@@ -1,3 +1,4 @@
+// src/components/pages/PortfolioPage.tsx
 "use client";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
@@ -10,17 +11,19 @@ const T2 = "#8e8e93";
 const T3 = "#48484a";
 
 const TABS = ["Holdings", "PnL", "History", "Wallets"];
-const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "";
 
 export default function PortfolioPage() {
-  const { wallet, status, error, connectWithCode, disconnect } = useAuth();
+  const { wallet, status, error, connectExistingWallet, createWallet, disconnect } = useAuth();
   const [tab, setTab] = useState("Holdings");
   const [inputAddr, setInputAddr] = useState("");
   const [watchAddress, setWatchAddress] = useState("");
   const [balance, setBalance] = useState<any>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
-  const [codeInput, setCodeInput] = useState("");
-  const [submittingCode, setSubmittingCode] = useState(false);
+
+  // Reveal-once modal state for a freshly created custodial wallet
+  const [newWallet, setNewWallet] = useState<{ address: string; privateKey: string } | null>(null);
+  const [confirmedSaved, setConfirmedSaved] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const activeAddress = watchAddress || wallet?.address || "";
 
@@ -43,12 +46,19 @@ export default function PortfolioPage() {
     else setBalance(null);
   }, [activeAddress]);
 
-  async function handleCodeSubmit() {
-    if (!codeInput.trim()) return;
-    setSubmittingCode(true);
-    const ok = await connectWithCode(codeInput.trim());
-    setSubmittingCode(false);
-    if (ok) setCodeInput("");
+  async function handleCreateWallet() {
+    setCreating(true);
+    const result = await createWallet();
+    setCreating(false);
+    if (result) {
+      setNewWallet(result);
+      setConfirmedSaved(false);
+    }
+  }
+
+  function closeNewWalletModal() {
+    if (!confirmedSaved) return; // force acknowledgment before closing
+    setNewWallet(null);
   }
 
   const displayUsd = balance?.balanceUsd ?? "0.00";
@@ -87,50 +97,36 @@ export default function PortfolioPage() {
           <div style={{ background: S, border: `1px solid ${B}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Connect Wallet</div>
             <div style={{ fontSize: 11, color: T2, marginBottom: 10 }}>
-              Login with Telegram to view your positions, PnL, and trade history.
+              Connect an existing wallet or create a new one to view your positions, PnL, and trade history.
             </div>
 
-            {BOT_USERNAME && (
-              <a
-                href={`https://t.me/${BOT_USERNAME}?start=link`}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: "block", textAlign: "center", padding: 12, marginBottom: 10,
-                  background: G, color: "#000", borderRadius: 10,
-                  fontSize: 13, fontWeight: 700, textDecoration: "none",
-                }}
-              >
-                💬 Connect with Telegram
-              </a>
-            )}
+            <button
+              onClick={connectExistingWallet}
+              disabled={status === "connecting"}
+              style={{
+                display: "block", width: "100%", textAlign: "center", padding: 12, marginBottom: 8,
+                background: G, color: "#000", borderRadius: 10, border: "none",
+                fontSize: 13, fontWeight: 700, cursor: status === "connecting" ? "default" : "pointer",
+                opacity: status === "connecting" ? 0.6 : 1,
+              }}
+            >
+              {status === "connecting" ? "Connecting…" : "🦊 Connect Wallet"}
+            </button>
 
-            <div style={{ fontSize: 10, color: T3, textAlign: "center", marginBottom: 8 }}>
-              or send /link to the bot and enter your code
-            </div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-              <input
-                value={codeInput}
-                onChange={e => setCodeInput(e.target.value.toUpperCase())}
-                placeholder="Login code"
-                style={{
-                  flex: 1, background: "rgba(255,255,255,0.03)", border: `1px solid ${B}`,
-                  borderRadius: 10, padding: "9px 10px", fontSize: 11, color: "#f2f2f7",
-                  outline: "none", fontFamily: "monospace", textTransform: "uppercase",
-                }}
-              />
-              <button
-                onClick={handleCodeSubmit}
-                disabled={submittingCode || !codeInput.trim()}
-                style={{
-                  padding: "9px 14px", borderRadius: 10, border: "none",
-                  background: G, color: "#000", fontSize: 11, fontWeight: 700,
-                  cursor: submittingCode ? "default" : "pointer",
-                }}
-              >
-                {submittingCode ? "…" : "Connect"}
-              </button>
-            </div>
+            <button
+              onClick={handleCreateWallet}
+              disabled={creating}
+              style={{
+                display: "block", width: "100%", textAlign: "center", padding: 12, marginBottom: 10,
+                background: "rgba(255,255,255,0.03)", color: "#f2f2f7", borderRadius: 10,
+                border: `1px solid ${B}`,
+                fontSize: 13, fontWeight: 700, cursor: creating ? "default" : "pointer",
+                opacity: creating ? 0.6 : 1,
+              }}
+            >
+              {creating ? "Creating…" : "✨ Create New Wallet"}
+            </button>
+
             {error && <div style={{ fontSize: 10, color: R, marginBottom: 8 }}>{error}</div>}
 
             <div style={{ fontSize: 10, color: T3, textAlign: "center", marginBottom: 8 }}>or view any address</div>
@@ -238,7 +234,7 @@ export default function PortfolioPage() {
             </div>
             {activeAddress && (
               <button
-                onClick={() => window.open(`https://explorer.robinhood.com/address/${activeAddress}`, "_blank")}
+                onClick={() => window.open(`https://robinhoodchain.blockscout.com/address/${activeAddress}`, "_blank")}
                 style={{
                   marginTop: 12, padding: "10px 20px", borderRadius: 10,
                   border: `1px solid ${G}`, background: "rgba(0,200,5,0.08)",
@@ -269,16 +265,18 @@ export default function PortfolioPage() {
                     <div style={{ fontWeight: 700 }}>${displayUsd}</div>
                   </div>
                 </div>
-                <button
-                  onClick={() => { disconnect(); setWatchAddress(""); setBalance(null); }}
-                  style={{
-                    width: "100%", padding: 13, borderRadius: 12,
-                    border: `1px solid ${B}`, background: S,
-                    color: R, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                  }}
-                >
-                  Disconnect
-                </button>
+                {status === "connected" && (
+                  <button
+                    onClick={() => { disconnect(); setWatchAddress(""); setBalance(null); }}
+                    style={{
+                      width: "100%", padding: 13, borderRadius: 12,
+                      border: `1px solid ${B}`, background: S,
+                      color: R, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                    }}
+                  >
+                    Disconnect
+                  </button>
+                )}
               </>
             ) : (
               <div style={{ fontSize: 12, color: T2, textAlign: "center", padding: "30px 0" }}>
@@ -288,6 +286,50 @@ export default function PortfolioPage() {
           </div>
         )}
       </div>
+
+      {/* Reveal-once private key modal after creating a new wallet */}
+      {newWallet && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16,
+        }}>
+          <div style={{ background: "#121214", border: `1px solid ${B}`, borderRadius: 14, padding: 18, maxWidth: 340, width: "100%" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: R, marginBottom: 8 }}>Save Your Private Key</div>
+            <div style={{ fontSize: 11, color: T2, marginBottom: 10 }}>
+              This is shown once. Anyone with this key controls your funds. Never share it.
+            </div>
+            <div style={{
+              fontFamily: "monospace", fontSize: 11, background: "#000",
+              border: `1px solid rgba(255,59,48,0.4)`, borderRadius: 8,
+              padding: 10, wordBreak: "break-all", color: "#f2f2f7", marginBottom: 10,
+            }}>
+              {newWallet.privateKey}
+            </div>
+            <div style={{ fontFamily: "monospace", fontSize: 10, color: T2, marginBottom: 12 }}>
+              Address: {newWallet.address}
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#f2f2f7", marginBottom: 12 }}>
+              <input
+                type="checkbox"
+                checked={confirmedSaved}
+                onChange={e => setConfirmedSaved(e.target.checked)}
+              />
+              I've saved my private key somewhere safe
+            </label>
+            <button
+              onClick={closeNewWalletModal}
+              disabled={!confirmedSaved}
+              style={{
+                width: "100%", padding: 11, borderRadius: 10, border: "none",
+                background: confirmedSaved ? G : "rgba(0,200,5,0.3)", color: "#000",
+                fontSize: 12, fontWeight: 700, cursor: confirmedSaved ? "pointer" : "default",
+              }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
