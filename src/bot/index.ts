@@ -25,7 +25,7 @@ function encryptSecret(text: string): string {
   return Buffer.concat([iv, authTag, encrypted]).toString("hex");
 }
 
-// ── Local session cache (UI responsiveness only — source of truth is Postgres) ──
+// ── Local session cache ──────────────────────────────────────────────────────
 interface UserState {
   step: string;
   data: Record<string, string>;
@@ -56,9 +56,9 @@ async function ensureUser(ctx: any) {
   const tgUser = ctx.from;
   if (!tgUser) return null;
   return prisma.user.upsert({
-    where: { telegramId: BigInt(tgUser.id) },
+    where: { telegramId: String(tgUser.id) },
     update: { username: tgUser.username },
-    create: { telegramId: BigInt(tgUser.id), username: tgUser.username },
+    create: { telegramId: String(tgUser.id), username: tgUser.username },
   });
 }
 
@@ -68,7 +68,7 @@ async function loadWalletsFromDb(userId: number, dbUserId: string) {
     orderBy: { createdAt: "asc" },
   });
   const s = getState(userId);
-  s.wallets = rows.map(r => ({ name: r.name, address: r.address, key: "" })); // key not decrypted client-side
+  s.wallets = rows.map(r => ({ name: r.name, address: r.address, key: "" }));
   if (s.wallets.length > 0 && s.activeWallet >= s.wallets.length) s.activeWallet = 0;
 }
 
@@ -206,16 +206,13 @@ async function showMain(ctx: any, edit = false) {
 }
 
 // ── Start ────────────────────────────────────────────────────────────────────
-// FIXED: DB failures no longer block the menu from showing. Previously, if
-// ensureUser() threw (e.g. the telegramId column type mismatch), the whole
-// handler crashed and the user got no response at all to /start.
 bot.start(async (ctx) => {
   const userId = ctx.from?.id!;
   let dbUser = null;
   let isNewUser = false;
 
   try {
-    const existing = await prisma.user.findUnique({ where: { telegramId: BigInt(userId) } });
+    const existing = await prisma.user.findUnique({ where: { telegramId: String(userId) } });
     isNewUser = !existing;
     dbUser = await ensureUser(ctx);
     if (dbUser) await loadWalletsFromDb(userId, dbUser.id);
