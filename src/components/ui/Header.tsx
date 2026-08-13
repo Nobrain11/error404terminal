@@ -1,15 +1,17 @@
+// src/components/Header.tsx
 "use client";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import type { Page } from "../Terminal";
 
-const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "";
-
 export default function Header({ page, onNavigate }: { page: string; onNavigate: (p: Page) => void }) {
-  const { wallet, status, error, connectWithCode } = useAuth();
+  const { wallet, status, error, connectExistingWallet, createWallet, importWallet, disconnect } = useAuth();
   const [showConnect, setShowConnect] = useState(false);
-  const [codeInput, setCodeInput] = useState("");
+  const [mode, setMode] = useState<"choose" | "import" | "reveal">("choose");
+  const [importInput, setImportInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [newWallet, setNewWallet] = useState<{ address: string; privateKey: string } | null>(null);
+  const [confirmedSaved, setConfirmedSaved] = useState(false);
 
   const TITLES: Record<string, string> = {
     discover: "Discover",
@@ -26,15 +28,42 @@ export default function Header({ page, onNavigate }: { page: string; onNavigate:
     return `${addr.slice(0, 5)}…${addr.slice(-3)}`;
   }
 
-  async function handleCodeSubmit() {
-    if (!codeInput.trim()) return;
+  async function handleConnectExisting() {
     setSubmitting(true);
-    const ok = await connectWithCode(codeInput.trim());
+    await connectExistingWallet();
+    setSubmitting(false);
+    setShowConnect(false);
+    setMode("choose");
+  }
+
+  async function handleCreate() {
+    setSubmitting(true);
+    const result = await createWallet();
+    setSubmitting(false);
+    if (result) {
+      setNewWallet(result);
+      setConfirmedSaved(false);
+      setMode("reveal");
+    }
+  }
+
+  async function handleImport() {
+    if (!importInput.trim()) return;
+    setSubmitting(true);
+    const ok = await importWallet(importInput.trim());
     setSubmitting(false);
     if (ok) {
       setShowConnect(false);
-      setCodeInput("");
+      setMode("choose");
+      setImportInput("");
     }
+  }
+
+  function closeReveal() {
+    if (!confirmedSaved) return;
+    setNewWallet(null);
+    setShowConnect(false);
+    setMode("choose");
   }
 
   return (
@@ -74,7 +103,7 @@ export default function Header({ page, onNavigate }: { page: string; onNavigate:
             </div>
           ) : (
             <button
-              onClick={() => setShowConnect(s => !s)}
+              onClick={() => { setShowConnect(s => !s); setMode("choose"); }}
               style={{
                 fontSize: 11, fontWeight: 700, padding: "6px 10px",
                 background: "#00C805", border: "none",
@@ -103,56 +132,134 @@ export default function Header({ page, onNavigate }: { page: string; onNavigate:
 
       {showConnect && status !== "connected" && (
         <div style={{
-          position: "absolute", top: "100%", right: 12, marginTop: 6, width: 260,
+          position: "absolute", top: "100%", right: 12, marginTop: 6, width: 270,
           background: "#121214", border: "1px solid rgba(255,255,255,0.1)",
           borderRadius: 14, padding: 14, zIndex: 200,
           boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
         }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Sign In</div>
-          <div style={{ fontSize: 11, color: "#8e8e93", marginBottom: 10 }}>
-            Connect to start trading on-chain.
-          </div>
+          {mode === "choose" && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Sign In</div>
+              <div style={{ fontSize: 11, color: "#8e8e93", marginBottom: 10 }}>
+                Connect a wallet to start trading on-chain.
+              </div>
 
-          {BOT_USERNAME && (
-            <a
-              href={`https://t.me/${BOT_USERNAME}?start=link`}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: "block", textAlign: "center", padding: "10px", marginBottom: 10,
-                background: "#00C805", color: "#000", borderRadius: 10,
-                fontSize: 12, fontWeight: 700, textDecoration: "none",
-              }}
-            >
-              💬 Open in Telegram
-            </a>
+              <button
+                onClick={handleConnectExisting}
+                disabled={submitting}
+                style={{
+                  display: "block", width: "100%", textAlign: "center", padding: "10px", marginBottom: 8,
+                  background: "#00C805", color: "#000", borderRadius: 10, border: "none",
+                  fontSize: 12, fontWeight: 700, cursor: submitting ? "default" : "pointer",
+                  opacity: submitting ? 0.6 : 1,
+                }}
+              >
+                🦊 Connect Wallet
+              </button>
+
+              <button
+                onClick={handleCreate}
+                disabled={submitting}
+                style={{
+                  display: "block", width: "100%", textAlign: "center", padding: "10px", marginBottom: 8,
+                  background: "rgba(255,255,255,0.05)", color: "#f2f2f7", borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  fontSize: 12, fontWeight: 700, cursor: submitting ? "default" : "pointer",
+                  opacity: submitting ? 0.6 : 1,
+                }}
+              >
+                ✨ Create New Wallet
+              </button>
+
+              <button
+                onClick={() => setMode("import")}
+                style={{
+                  display: "block", width: "100%", textAlign: "center", padding: "10px",
+                  background: "none", color: "#8e8e93", borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                📥 Import Wallet
+              </button>
+
+              {error && <div style={{ fontSize: 10, color: "#FF3B30", marginTop: 8 }}>{error}</div>}
+            </>
           )}
 
-          <div style={{ fontSize: 10, color: "#48484a", textAlign: "center", marginBottom: 8 }}>
-            or enter your login code
-          </div>
-          <input
-            value={codeInput}
-            onChange={e => setCodeInput(e.target.value.toUpperCase())}
-            placeholder="Send /link to the bot"
-            style={{
-              width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 8, padding: "9px 10px", fontSize: 12, color: "#f2f2f7",
-              outline: "none", fontFamily: "monospace", marginBottom: 8, textTransform: "uppercase",
-            }}
-          />
-          {error && <div style={{ fontSize: 10, color: "#FF3B30", marginBottom: 8 }}>{error}</div>}
-          <button
-            onClick={handleCodeSubmit}
-            disabled={submitting || !codeInput.trim()}
-            style={{
-              width: "100%", padding: "9px", borderRadius: 8, border: "none",
-              background: submitting ? "rgba(0,200,5,0.4)" : "#00C805", color: "#000",
-              fontSize: 12, fontWeight: 700, cursor: submitting ? "default" : "pointer",
-            }}
-          >
-            {submitting ? "Verifying…" : "Connect"}
-          </button>
+          {mode === "import" && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Import Wallet</div>
+              <div style={{ fontSize: 11, color: "#8e8e93", marginBottom: 10 }}>
+                Paste your private key or 12/24-word recovery phrase.
+              </div>
+              <textarea
+                value={importInput}
+                onChange={e => setImportInput(e.target.value)}
+                placeholder="0x... or word word word..."
+                rows={3}
+                style={{
+                  width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 8, padding: "9px 10px", fontSize: 11, color: "#f2f2f7",
+                  outline: "none", fontFamily: "monospace", marginBottom: 8, resize: "none",
+                }}
+              />
+              {error && <div style={{ fontSize: 10, color: "#FF3B30", marginBottom: 8 }}>{error}</div>}
+              <button
+                onClick={handleImport}
+                disabled={submitting || !importInput.trim()}
+                style={{
+                  width: "100%", padding: "9px", borderRadius: 8, border: "none",
+                  background: submitting ? "rgba(0,200,5,0.4)" : "#00C805", color: "#000",
+                  fontSize: 12, fontWeight: 700, cursor: submitting ? "default" : "pointer", marginBottom: 6,
+                }}
+              >
+                {submitting ? "Importing…" : "Import"}
+              </button>
+              <button
+                onClick={() => setMode("choose")}
+                style={{
+                  width: "100%", padding: "8px", borderRadius: 8, border: "none",
+                  background: "none", color: "#8e8e93", fontSize: 11, cursor: "pointer",
+                }}
+              >
+                ← Back
+              </button>
+            </>
+          )}
+
+          {mode === "reveal" && newWallet && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: "#FF3B30" }}>
+                Save Your Private Key
+              </div>
+              <div style={{ fontSize: 11, color: "#8e8e93", marginBottom: 8 }}>
+                Shown once. Anyone with this key controls your funds.
+              </div>
+              <div style={{
+                fontFamily: "monospace", fontSize: 10, background: "#000",
+                border: "1px solid rgba(255,59,48,0.4)", borderRadius: 8,
+                padding: 8, wordBreak: "break-all", color: "#f2f2f7", marginBottom: 8,
+              }}>
+                {newWallet.privateKey}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#f2f2f7", marginBottom: 10 }}>
+                <input type="checkbox" checked={confirmedSaved} onChange={e => setConfirmedSaved(e.target.checked)} />
+                I've saved my private key
+              </label>
+              <button
+                onClick={closeReveal}
+                disabled={!confirmedSaved}
+                style={{
+                  width: "100%", padding: "9px", borderRadius: 8, border: "none",
+                  background: confirmedSaved ? "#00C805" : "rgba(0,200,5,0.3)", color: "#000",
+                  fontSize: 12, fontWeight: 700, cursor: confirmedSaved ? "pointer" : "default",
+                }}
+              >
+                Done
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
