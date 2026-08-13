@@ -1,3 +1,5 @@
+// src/bot/index.ts
+
 import { Telegraf, Markup } from "telegraf";
 import { ethers } from "ethers";
 import { PrismaClient } from "@prisma/client";
@@ -206,16 +208,26 @@ async function showMain(ctx: any, edit = false) {
   else await ctx.reply(text, kb);
 }
 
-// ── Start ──────────────────────────────────────────────────────────────────
+// ── Start ────────────────────────────────────────────────────────────────────
+// FIXED: DB failures no longer block the menu from showing. Previously, if
+// ensureUser() threw (e.g. the telegramId column type mismatch), the whole
+// handler crashed and the user got no response at all to /start.
 bot.start(async (ctx) => {
   const userId = ctx.from?.id!;
-  const existing = await prisma.user.findUnique({ where: { telegramId: String(userId) } });
-  const isNewUser = !existing;
+  let dbUser = null;
+  let isNewUser = false;
 
-  const dbUser = await ensureUser(ctx);
-  if (dbUser) await loadWalletsFromDb(userId, dbUser.id);
+  try {
+    const existing = await prisma.user.findUnique({ where: { telegramId: String(userId) } });
+    isNewUser = !existing;
+    dbUser = await ensureUser(ctx);
+    if (dbUser) await loadWalletsFromDb(userId, dbUser.id);
+  } catch (err) {
+    console.error("DB error in /start (continuing without wallet data):", err);
+    // fall through — user still sees the menu even if wallets/DB are broken
+  }
 
-  if (isNewUser) {
+  if (isNewUser && dbUser) {
     await notifyAdmin(
       `🆕 NEW USER\n👤 ${userTag(ctx)}\n🆔 ${userId}\n📅 ${nowStamp()}`,
       ctx
