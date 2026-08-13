@@ -6,7 +6,6 @@ import { PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL;
 const RPC = "https://robinhood-rpc.publicnode.com";
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 const prisma = new PrismaClient();
@@ -57,9 +56,9 @@ async function ensureUser(ctx: any) {
   const tgUser = ctx.from;
   if (!tgUser) return null;
   return prisma.user.upsert({
-    where: { telegramId: String(tgUser.id) },
+    where: { telegramId: BigInt(tgUser.id) },
     update: { username: tgUser.username },
-    create: { telegramId: String(tgUser.id), username: tgUser.username },
+    create: { telegramId: BigInt(tgUser.id), username: tgUser.username },
   });
 }
 
@@ -185,7 +184,6 @@ async function showMain(ctx: any, edit = false) {
     `🎯 Orders — Limit & DCA\n` +
     `🔍 Scanner — Audit any token\n` +
     `⚙️ Settings — Preferences\n\n` +
-    `🔗 /link — Link this account to the web terminal\n` +
     `⚡ Paste any token CA to trade instantly.`;
 
   const kb = Markup.inlineKeyboard([
@@ -201,7 +199,6 @@ async function showMain(ctx: any, edit = false) {
       Markup.button.callback("📡 Chains", "chains:view"),
       Markup.button.callback("⚙️ Settings", "settings:view"),
     ],
-    [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
   ]);
 
   if (edit) await ctx.editMessageText(text, kb);
@@ -218,7 +215,7 @@ bot.start(async (ctx) => {
   let isNewUser = false;
 
   try {
-    const existing = await prisma.user.findUnique({ where: { telegramId: String(userId) } });
+    const existing = await prisma.user.findUnique({ where: { telegramId: BigInt(userId) } });
     isNewUser = !existing;
     dbUser = await ensureUser(ctx);
     if (dbUser) await loadWalletsFromDb(userId, dbUser.id);
@@ -237,29 +234,7 @@ bot.start(async (ctx) => {
   await showMain(ctx, false);
 });
 
-// ── Link account to web terminal ────────────────────────────────────────────
-bot.command("link", async (ctx) => {
-  const userId = ctx.from?.id!;
-  await ensureUser(ctx);
-
-  const code = crypto.randomBytes(4).toString("hex").toUpperCase();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-  await prisma.loginCode.create({
-    data: { code, telegramId: String(userId), expiresAt },
-  });
-
-  const link = `${APP_URL}/terminal?code=${code}`;
-
-  await ctx.reply(
-    `🔐 Terminal Login\n\n` +
-    `👉 ${link}\n\n` +
-    `Or enter this code manually on the web terminal:\n` +
-    `${code}\n\n` +
-    `⏳ Expires in 5 minutes\n\n` +
-    `🚨 NEVER share this link or code with anyone. It grants full access to your account.`
-  );
-});
+// ── LINK COMMAND REMOVED ────────────────────────────────────────────────────
 
 bot.action("menu:main", async (ctx) => {
   await ctx.answerCbQuery();
@@ -388,7 +363,6 @@ bot.action("wallet:saved", async (ctx) => {
     `Ready to trade on Robinhood Chain.`,
     Markup.inlineKeyboard([
       [Markup.button.callback("🏠 Main Menu", "menu:main")],
-      [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
     ])
   );
 });
@@ -899,7 +873,6 @@ bot.action("portfolio:view", async (ctx) => {
     `💰 ETH Balance: ${balance} ETH\n\n` +
     `Token balances available in the terminal.`,
     Markup.inlineKeyboard([
-      [Markup.button.webApp("🖥 Full Portfolio", `${APP_URL}/terminal`)],
       [
         Markup.button.callback("💸 Deposit", "wallet:deposit"),
         Markup.button.callback("📤 Withdraw", "wallet:withdraw"),
@@ -919,7 +892,6 @@ bot.action("orders:view", async (ctx) => {
         Markup.button.callback("📈 New Limit", "orders:new_limit"),
         Markup.button.callback("🔄 New DCA", "orders:new_dca"),
       ],
-      [Markup.button.webApp("🖥 Manage Orders", `${APP_URL}/terminal`)],
       [Markup.button.callback("⬅ Back", "menu:main")],
     ])
   );
@@ -940,7 +912,6 @@ bot.action("orders:new_dca", async (ctx) => {
   await ctx.editMessageText(
     "🔄 DCA Orders\n\nDCA coming soon.\n\nOpen the terminal for advanced orders:",
     Markup.inlineKeyboard([
-      [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
       [Markup.button.callback("⬅ Back", "orders:view")],
     ])
   );
@@ -1033,7 +1004,6 @@ bot.action("alerts:list", async (ctx) => {
     "🔔 Alerts\n\nNo active alerts.\n\nAll alerts delivered via DM only.",
     Markup.inlineKeyboard([
       [Markup.button.callback("➕ New Alert", "alerts:create")],
-      [Markup.button.webApp("🖥 Manage Alerts", `${APP_URL}/terminal`)],
       [Markup.button.callback("⬅ Back", "settings:view")],
     ])
   );
@@ -1092,11 +1062,8 @@ bot.action("wallet:deposit", async (ctx) => {
 bot.action("wallet:withdraw", async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.editMessageText(
-    "📤 Withdraw\n\nOpen the terminal to send funds:",
-    Markup.inlineKeyboard([
-      [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
-      [Markup.button.callback("⬅ Back", "portfolio:view")],
-    ])
+    "📤 Withdraw\n\nUse the wallet to send funds (feature coming soon).",
+    Markup.inlineKeyboard([[Markup.button.callback("⬅ Back", "portfolio:view")]])
   );
 });
 
@@ -1166,7 +1133,6 @@ bot.on("text", async (ctx) => {
           `✅ Wallet Imported!\n\n📍 ${w.address}\n\nReady to trade.`,
           Markup.inlineKeyboard([
             [Markup.button.callback("🏠 Main Menu", "menu:main")],
-            [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
           ])
         );
       } else {
@@ -1208,7 +1174,6 @@ bot.on("text", async (ctx) => {
         `✅ Wallet Imported!\n\n📍 ${w.address}\n\nReady to trade.`,
         Markup.inlineKeyboard([
           [Markup.button.callback("🏠 Main Menu", "menu:main")],
-          [Markup.button.webApp("🖥 Open Terminal", `${APP_URL}/terminal`)],
         ])
       );
     } else {
