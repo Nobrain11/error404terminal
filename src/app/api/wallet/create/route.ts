@@ -1,19 +1,47 @@
+// src/app/api/wallet/create/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { createWallet } from "@/lib/wallet";
-import { verifyToken } from "@/lib/jwt";
+import { PrismaClient } from "@prisma/client";
+import { generateCustodialWallet } from "@/lib/wallet/custodial";
+import { getUserFromBearerToken } from "@/lib/auth/session";
+
+const prisma = new PrismaClient();
 
 export async function POST(req: NextRequest) {
-  const auth = req.headers.get("authorization")?.split(" ")[1];
-  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const session = await getUserFromBearerToken(req.headers.get("authorization"));
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
 
-  const { userId } = verifyToken(auth) as { userId: string };
-  const { name } = await req.json();
-  const { address, encryptedKey, encryptedPhrase } = createWallet();
+  let name = "Wallet 1";
+  try {
+    const body = await req.json();
+    if (body?.name && typeof body.name === "string") name = body.name;
+  } catch {
+    // no body sent — fine, keep default name
+  }
 
-  const wallet = await prisma.wallet.create({
-    data: { userId, name: name || "Wallet 1", address, encryptedKey, encryptedPhrase },
-  });
+  try {
+    const existingCount = await prisma.wallet.count({ where: { userId: session.userId } });
+    const { address, privateKey, encryptedPrivateKey } = generateCustodialWallet();
 
-  return NextResponse.json({ address: wallet.address, id: wallet.id });
+    await prisma.wallet.create({
+      data: {
+        userId: session.userId,
+        name,
+        address,
+        encryptedKey: encryptedPrivateKey,
+        isDefault: existingCount === 0, // first wallet becomes default automatically
+      },
+    });
+
+    // privateKey is returned exactly once, over HTTPS, to the user who just
+    // created it. It is never stored in plaintext and never returned again.
+    return NextResponse.json({ address, privateKey });
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      return NextResponse.json({ error: "Address collision — try again." }, { status: 500 });
+    }
+    console.error("Wallet creation failed:", err); // safe — no key material logged
+    return NextResponse.json({ error: "Could not create wallet." }, { status: 500 });
+  }
 }
