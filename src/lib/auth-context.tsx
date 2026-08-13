@@ -1,7 +1,11 @@
-// src/lib/auth-context.tsx
 "use client";
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { ethers } from "ethers";
+
+interface AuthUser {
+  id: string;
+  telegramId: string;
+  username?: string;
+}
 
 interface AuthWallet {
   address: string;
@@ -10,21 +14,23 @@ interface AuthWallet {
 
 interface AuthContextValue {
   token: string | null;
+  user: AuthUser | null;
   wallet: AuthWallet | null;
   status: "idle" | "connecting" | "connected" | "unavailable";
   error: string | null;
-  connectExistingWallet: () => Promise<void>;
-  createWallet: () => Promise<{ address: string; privateKey: string } | null>;
+  connect: () => Promise<void>;
+  connectWithCode: (code: string) => Promise<boolean>;
   disconnect: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   token: null,
+  user: null,
   wallet: null,
   status: "idle",
   error: null,
-  connectExistingWallet: async () => {},
-  createWallet: async () => null,
+  connect: async () => {},
+  connectWithCode: async () => false,
   disconnect: () => {},
 });
 
@@ -32,101 +38,107 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: {
+        ready: () => void;
+        expand: () => void;
+        initData: string;
+      };
+    };
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [wallet, setWallet] = useState<AuthWallet | null>(null);
   const [status, setStatus] = useState<AuthContextValue["status"]>("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const applySession = (data: { token: string; wallet?: AuthWallet; address?: string }) => {
+  const applySession = (data: any) => {
     setToken(data.token);
-    setWallet(data.wallet ?? (data.address ? { address: data.address, name: "Wallet 1" } : null));
+    setUser(data.user);
+    setWallet(data.wallet);
     setStatus("connected");
     localStorage.setItem("token", data.token);
   };
 
-  const connectExistingWallet = useCallback(async () => {
-    setError(null);
-    if (typeof window === "undefined" || !window.ethereum) {
-      setError("No wallet found. Install MetaMask or another browser wallet.");
+  const connect = useCallback(async () => {
+    const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : undefined;
+
+    if (!tg || !tg.initData) {
       setStatus("unavailable");
       return;
     }
+
     setStatus("connecting");
+    setError(null);
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const accounts: string[] = await provider.send("eth_requestAccounts", []);
-      const address = accounts[0];
-
-      const nonceRes = await fetch(`/api/auth/nonce?address=${address}`);
-      const { message, nonce } = await nonceRes.json();
-
-      const signer = await provider.getSigner();
-      const signature = await signer.signMessage(message);
-
-      const res = await fetch("/api/auth/wallet-connect", {
+      const res = await fetch("/api/auth/telegram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, signature, message, nonce }),
+        body: JSON.stringify({ initData: tg.initData }),
       });
-      const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Could not connect wallet.");
         setStatus("unavailable");
         return;
       }
+      const data = await res.json();
       applySession(data);
     } catch (e) {
-      console.error("Wallet connect failed", e);
-      setError("Connection was cancelled or failed.");
+      console.error("Telegram connect failed", e);
       setStatus("unavailable");
     }
   }, []);
 
-  const createWallet = useCallback(async () => {
-    setError(null);
+  const connectWithCode = useCallback(async (code: string) => {
     setStatus("connecting");
+    setError(null);
     try {
-      const res = await fetch("/api/auth/wallet-create", { method: "POST" });
+      const res = await fetch("/api/auth/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Could not create wallet.");
+        setError(data.error || "Invalid code");
         setStatus("unavailable");
-        return null;
+        return false;
       }
       applySession(data);
-      return { address: data.address, privateKey: data.privateKey };
+      return true;
     } catch (e) {
-      console.error("Wallet create failed", e);
-      setError("Network error.");
+      console.error("Code connect failed", e);
+      setError("Network error");
       setStatus("unavailable");
-      return null;
+      return false;
     }
   }, []);
 
   const disconnect = useCallback(() => {
     setToken(null);
+    setUser(null);
     setWallet(null);
     setStatus("idle");
     localStorage.removeItem("token");
   }, []);
 
   useEffect(() => {
-    const saved = localStorage.getItem("token");
-    if (saved) {
-      // Token exists locally; treat as connected. Add a /api/auth/me check here
-      // later if you want to validate it against the Session table on load.
-      setToken(saved);
-      setStatus("connected");
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      connect();
     } else {
-      setStatus("idle");
+      setStatus("unavailable");
     }
-  }, []);
+  }, [connect]);
 
   return (
-    <AuthContext.Provider
-      value={{ token, wallet, status, error, connectExistingWallet, createWallet, disconnect }}
-    >
+    <AuthContext.Provider value={{ token, user, wallet, status, error, connect, connectWithCode, disconnect }}>
       {children}
     </AuthContext.Provider>
   );
