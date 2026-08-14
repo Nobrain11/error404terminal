@@ -1,19 +1,11 @@
-// src/app/api/wallet/create/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import { generateCustodialWallet } from "@/lib/wallet/custodial";
 import { getUserFromBearerToken } from "@/lib/auth/session";
-
-const prisma = new PrismaClient();
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  // ─────────────────────────────────────────────────────────────────────────
-  // Authentication
-  // ─────────────────────────────────────────────────────────────────────────
-
   const session = await getUserFromBearerToken(
     req.headers.get("authorization"),
   );
@@ -25,50 +17,39 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Wallet name
-  // ─────────────────────────────────────────────────────────────────────────
-
   let name = "Wallet 1";
 
   try {
     const body = await req.json();
 
     if (
-      body &&
-      typeof body.name === "string" &&
-      body.name.trim().length > 0
+      typeof body?.name === "string" &&
+      body.name.trim()
     ) {
       name = body.name.trim().slice(0, 64);
     }
   } catch {
-    // Empty/non-JSON body is completely valid.
+    // Empty request body is allowed.
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Generate wallet FIRST.
-  //
-  // This is deliberately before the database queries.
-  //
-  // A database/schema problem must never prevent ethers from generating the
-  // wallet itself.
-  // ─────────────────────────────────────────────────────────────────────────
-
-  let generated: {
-    address: string;
-    privateKey: string;
-    encryptedPrivateKey: string;
-  };
+  // Generate first. Database must never control whether ethers
+  // can create a wallet.
+  let generated: ReturnType<
+    typeof generateCustodialWallet
+  >;
 
   try {
     generated = generateCustodialWallet();
-  } catch (err) {
-    console.error("Custodial wallet generation failed:", err);
+  } catch (error) {
+    console.error(
+      "Wallet generation failed:",
+      error instanceof Error
+        ? error.message
+        : error,
+    );
 
     return NextResponse.json(
-      {
-        error: "Could not generate wallet.",
-      },
+      { error: "Could not generate wallet." },
       { status: 500 },
     );
   }
@@ -79,46 +60,29 @@ export async function POST(req: NextRequest) {
     encryptedPrivateKey,
   } = generated;
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Determine whether this is the user's first wallet.
-  //
-  // If the database is temporarily unavailable or the schema is behind,
-  // default to false rather than preventing wallet generation.
-  // ─────────────────────────────────────────────────────────────────────────
-
   let isDefault = false;
 
   try {
-    const existingCount =
-      await prisma.wallet.count({
-        where: {
-          userId: session.userId,
-        },
-      });
+    const count = await prisma.wallet.count({
+      where: {
+        userId: session.userId,
+      },
+    });
 
-    isDefault = existingCount === 0;
-  } catch (err: any) {
+    isDefault = count === 0;
+  } catch (error) {
     console.error(
-      "Could not determine wallet count:",
-      err?.code || err?.message || err,
+      "Wallet count lookup failed:",
+      error instanceof Error
+        ? error.message
+        : error,
     );
 
-    // We deliberately continue.
-    //
-    // The wallet itself has already been generated.
-    // The database schema issue should not block the wallet-generation path.
-    isDefault = false;
+    // Continue. Generation itself succeeded.
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Persist encrypted wallet.
-  //
-  // NOTE:
-  // The private key is NEVER written to PostgreSQL in plaintext.
-  // ─────────────────────────────────────────────────────────────────────────
-
   try {
-    await prisma.wallet.create({
+    const wallet = await prisma.wallet.create({
       data: {
         userId: session.userId,
         name,
@@ -128,65 +92,66 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Return the private key exactly once.
     return NextResponse.json({
       success: true,
+      persisted: true,
+      id: wallet.id,
       address,
       privateKey,
+      name: wallet.name,
     });
-  } catch (err: any) {
-    // Unique address collision.
-    if (err?.code === "P2002") {
-      console.error(
-        "Wallet address collision during creation.",
-      );
-
+  } catch (error: any) {
+    if (error?.code === "P2002") {
       return NextResponse.json(
         {
-          error: "Address collision — please try again.",
+          error:
+            "Wallet address collision. Please try again.",
         },
         { status: 409 },
       );
     }
 
-    // Prisma P2022 = database column/schema mismatch.
-    //
-    // We explicitly recognize it so the logs make the real problem obvious.
-    if (err?.code === "P2022") {
+    if (error?.code === "P2022") {
       console.error(
-        "Wallet database schema is behind Prisma schema. " +
-          "Wallet.name is missing from production database.",
+        "Wallet schema is outdated: Wallet.name is missing.",
       );
 
+      // Do NOT pretend the wallet was saved.
+      // Give the user the newly generated wallet so it
+      // is not silently lost.
       return NextResponse.json(
         {
-          error:
-            "Wallet generated, but database schema needs to be updated.",
-          code: "DATABASE_SCHEMA_OUTDATED",
+          success: true,
+          persisted: false,
+          requiresDatabaseRepair: true,
           address,
           privateKey,
-          persisted: false,
+          name,
+          warning:
+            "Wallet generated successfully, but it could not be saved yet. Back up the private key before leaving this screen.",
         },
-        { status: 503 },
+        { status: 200 },
       );
     }
 
     console.error(
       "Wallet persistence failed:",
-      err?.code || err?.message || err,
+      error instanceof Error
+        ? error.message
+        : error,
     );
 
     return NextResponse.json(
       {
-        error:
-          "Wallet was generated but could not be saved. " +
-          "Do not close this screen until the wallet has been backed up.",
-        code: "WALLET_NOT_PERSISTED",
+        success: true,
+        persisted: false,
         address,
         privateKey,
-        persisted: false,
+        name,
+        warning:
+          "Wallet generated, but database storage failed. Back up your private key before leaving.",
       },
-      { status: 503 },
+      { status: 200 },
     );
   }
 }
