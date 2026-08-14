@@ -1,23 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
 
-const RPC =
-  process.env.NEXT_PUBLIC_RPC_URL ||
-  "https://rpc.mainnet.chain.robinhood.com";
-
-const CHAIN_ID = 4663;
-
 const BLOCKSCOUT =
   "https://robinhoodchain.blockscout.com/api/v2";
 
+const CHAIN_ID = 4663;
+
+const ERC20_TRANSFER_TOPIC = ethers.id(
+  "Transfer(address,address,uint256)"
+);
+
 function validAddress(address: string) {
-  return /^0x[a-fA-F0-9]{40}$/.test(address) &&
-    ethers.isAddress(address);
+  return ethers.isAddress(address);
 }
 
-function num(value: unknown) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+function shorten(value: string) {
+  if (!value) return "";
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function formatAmount(
+  value: bigint,
+  decimals: number
+) {
+  try {
+    return ethers.formatUnits(value, decimals);
+  } catch {
+    return "0";
+  }
 }
 
 async function fetchJson(url: string) {
@@ -40,10 +50,98 @@ async function fetchJson(url: string) {
   }
 }
 
-function shorten(address: string) {
-  if (!address) return "";
+function decodeTransfer(
+  log: any,
+  wallet: string
+) {
+  try {
+    const topics = log?.topics || [];
 
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+    if (
+      !topics.length ||
+      topics[0]?.toLowerCase() !==
+        ERC20_TRANSFER_TOPIC.toLowerCase()
+    ) {
+      return null;
+    }
+
+    if (topics.length < 3) return null;
+
+    const from =
+      ethers.getAddress(
+        `0x${topics[1].slice(-40)}`
+      );
+
+    const to =
+      ethers.getAddress(
+        `0x${topics[2].slice(-40)}`
+      );
+
+    const walletLower =
+      wallet.toLowerCase();
+
+    const fromLower =
+      from.toLowerCase();
+
+    const toLower =
+      to.toLowerCase();
+
+    if (
+      fromLower !== walletLower &&
+      toLower !== walletLower
+    ) {
+      return null;
+    }
+
+    const rawValue = BigInt(
+      log?.data || "0x0"
+    );
+
+    const tokenAddress =
+      log?.address || "";
+
+    return {
+      tokenAddress,
+      tokenSymbol:
+        log?.token?.symbol ||
+        log?.token_symbol ||
+        "TOKEN",
+
+      tokenName:
+        log?.token?.name ||
+        log?.token_name ||
+        "Token",
+
+      decimals: Number(
+        log?.token?.decimals ?? 18
+      ),
+
+      rawAmount:
+        rawValue.toString(),
+
+      amount: formatAmount(
+        rawValue,
+        Number(
+          log?.token?.decimals ?? 18
+        )
+      ),
+
+      from,
+      to,
+
+      direction:
+        toLower === walletLower
+          ? "in"
+          : "out",
+
+      logIndex:
+        log?.index ??
+        log?.log_index ??
+        null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function normalizeTransaction(
@@ -68,18 +166,8 @@ function normalizeTransaction(
     "";
 
   const isOutgoing =
-    from.toLowerCase() === wallet.toLowerCase();
-
-  const status =
-    tx?.status ||
-    tx?.result ||
-    "ok";
-
-  const timestamp =
-    tx?.timestamp ||
-    tx?.block_timestamp ||
-    tx?.created_at ||
-    null;
+    from.toLowerCase() ===
+    wallet.toLowerCase();
 
   const valueRaw =
     tx?.value ||
@@ -92,9 +180,7 @@ function normalizeTransaction(
     valueEth = ethers.formatEther(
       BigInt(String(valueRaw))
     );
-  } catch {
-    valueEth = "0";
-  }
+  } catch {}
 
   const feeRaw =
     tx?.fee?.value ||
@@ -107,15 +193,15 @@ function normalizeTransaction(
     feeEth = ethers.formatEther(
       BigInt(String(feeRaw))
     );
-  } catch {
-    feeEth = "0";
-  }
+  } catch {}
 
   return {
     hash,
+
     shortHash: shorten(hash),
 
     from,
+
     to,
 
     fromShort: from
@@ -126,9 +212,10 @@ function normalizeTransaction(
       ? shorten(to)
       : "",
 
-    direction: isOutgoing
-      ? "out"
-      : "in",
+    direction:
+      isOutgoing
+        ? "out"
+        : "in",
 
     type:
       tx?.method ||
@@ -136,16 +223,25 @@ function normalizeTransaction(
       "transaction",
 
     status:
-      String(status).toLowerCase() ===
-      "ok"
+      String(
+        tx?.status ||
+          tx?.result ||
+          "ok"
+      ).toLowerCase() === "ok"
         ? "success"
-        : String(status).toLowerCase(),
+        : String(
+            tx?.status ||
+              tx?.result ||
+              "unknown"
+          ).toLowerCase(),
 
-    valueRaw: String(valueRaw),
+    valueRaw:
+      String(valueRaw),
 
     valueEth,
 
-    feeRaw: String(feeRaw),
+    feeRaw:
+      String(feeRaw),
 
     feeEth,
 
@@ -154,10 +250,16 @@ function normalizeTransaction(
       tx?.block_number ||
       null,
 
-    timestamp,
+    timestamp:
+      tx?.timestamp ||
+      tx?.block_timestamp ||
+      tx?.created_at ||
+      null,
 
     explorerUrl:
       `https://robinhoodchain.blockscout.com/tx/${hash}`,
+
+    tokens: [],
   };
 }
 
@@ -173,49 +275,58 @@ export async function GET(
 
   const requestedLimit =
     Number(
-      url.searchParams.get("limit") || 50
+      url.searchParams.get("limit") ||
+        "50"
     );
 
   const limit = Math.min(
-    Math.max(requestedLimit, 1),
+    Math.max(
+      Number.isFinite(
+        requestedLimit
+      )
+        ? requestedLimit
+        : 50,
+      1
+    ),
     100
   );
 
-  if (!validAddress(address)) {
+  if (
+    !address ||
+    !validAddress(address)
+  ) {
     return NextResponse.json(
       {
+        success: false,
         error:
           "Valid wallet address required",
+        transactions: [],
       },
       { status: 400 }
     );
   }
 
   try {
-    /*
-     * Primary source:
-     * Blockscout address transaction endpoint.
-     */
-    const data = await fetchJson(
-      `${BLOCKSCOUT}/addresses/${address}/transactions?filter=validated`
-    );
+    const data =
+      await fetchJson(
+        `${BLOCKSCOUT}/addresses/${address}/transactions?filter=validated`
+      );
 
     let rawTransactions: any[] = [];
 
-    if (Array.isArray(data)) {
+    if (
+      Array.isArray(data)
+    ) {
       rawTransactions = data;
     } else if (
-      Array.isArray(data?.items)
+      Array.isArray(
+        data?.items
+      )
     ) {
-      rawTransactions = data.items;
+      rawTransactions =
+        data.items;
     }
 
-    /*
-     * Fallback endpoint.
-     *
-     * Some Blockscout deployments return the
-     * transaction collection under /transactions.
-     */
     if (
       rawTransactions.length === 0
     ) {
@@ -224,20 +335,25 @@ export async function GET(
           `${BLOCKSCOUT}/addresses/${address}/transactions`
         );
 
-      if (Array.isArray(fallback)) {
-        rawTransactions = fallback;
+      if (
+        Array.isArray(
+          fallback
+        )
+      ) {
+        rawTransactions =
+          fallback;
       } else if (
-        Array.isArray(fallback?.items)
+        Array.isArray(
+          fallback?.items
+        )
       ) {
         rawTransactions =
           fallback.items;
       }
     }
 
-    /*
-     * Normalize and remove duplicates.
-     */
-    const seen = new Set<string>();
+    const seen =
+      new Set<string>();
 
     const transactions =
       rawTransactions
@@ -249,7 +365,9 @@ export async function GET(
         )
         .filter(Boolean)
         .filter((tx: any) => {
-          if (seen.has(tx.hash)) {
+          if (
+            seen.has(tx.hash)
+          ) {
             return false;
           }
 
@@ -260,21 +378,133 @@ export async function GET(
         .slice(0, limit);
 
     /*
-     * Most recent first.
+     * Fetch token transfer events for each
+     * transaction. We intentionally keep this
+     * bounded so one Activity request cannot
+     * hammer the explorer API.
      */
-    transactions.sort(
-      (a: any, b: any) => {
-        const aTime = a.timestamp
-          ? new Date(
-              a.timestamp
-            ).getTime()
-          : 0;
+    for (
+      const transaction of transactions
+    ) {
+      try {
+        const logs =
+          await fetchJson(
+            `${BLOCKSCOUT}/transactions/${transaction.hash}/token-transfers`
+          );
 
-        const bTime = b.timestamp
-          ? new Date(
-              b.timestamp
-            ).getTime()
-          : 0;
+        const items =
+          Array.isArray(logs)
+            ? logs
+            : Array.isArray(
+                logs?.items
+              )
+              ? logs.items
+              : [];
+
+        transaction.tokens =
+          items
+            .map((item: any) => {
+              const token =
+                item?.token || {};
+
+              const from =
+                item?.from?.hash ||
+                item?.from ||
+                "";
+
+              const to =
+                item?.to?.hash ||
+                item?.to ||
+                "";
+
+              if (
+                !from ||
+                !to
+              ) {
+                return null;
+              }
+
+              const raw =
+                item?.total?.value ||
+                item?.value ||
+                item?.amount ||
+                "0";
+
+              const decimals =
+                Number(
+                  token?.decimals ??
+                    item?.token_decimals ??
+                    18
+                );
+
+              let amount =
+                "0";
+
+              try {
+                amount =
+                  ethers.formatUnits(
+                    String(raw),
+                    decimals
+                  );
+              } catch {}
+
+              return {
+                tokenAddress:
+                  token?.address ||
+                  item?.token?.hash ||
+                  item?.address ||
+                  "",
+
+                tokenName:
+                  token?.name ||
+                  "Unknown Token",
+
+                tokenSymbol:
+                  token?.symbol ||
+                  "TOKEN",
+
+                decimals,
+
+                rawAmount:
+                  String(raw),
+
+                amount,
+
+                from,
+
+                to,
+
+                direction:
+                  to.toLowerCase() ===
+                  address.toLowerCase()
+                    ? "in"
+                    : "out",
+              };
+            })
+            .filter(Boolean);
+      } catch {
+        transaction.tokens = [];
+      }
+    }
+
+    transactions.sort(
+      (
+        a: any,
+        b: any
+      ) => {
+        const aTime =
+          a.timestamp
+            ? new Date(
+                a.timestamp
+              ).getTime()
+            : 0;
+
+        const bTime =
+          b.timestamp
+            ? new Date(
+                b.timestamp
+              ).getTime()
+            : 0;
 
         return bTime - aTime;
       }
@@ -286,7 +516,8 @@ export async function GET(
 
         address,
 
-        chainId: CHAIN_ID,
+        chainId:
+          CHAIN_ID,
 
         network:
           "Robinhood Chain",
