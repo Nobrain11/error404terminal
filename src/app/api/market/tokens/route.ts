@@ -3,39 +3,27 @@ import { NextRequest, NextResponse } from "next/server";
 const CHAIN = "robinhood";
 const BASE = "https://api.dexscreener.com";
 
+function num(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function formatNum(n: number): string {
-  if (!n || isNaN(n)) return "N/A";
+  if (!Number.isFinite(n) || n <= 0) return "N/A";
 
-  if (n >= 1_000_000_000) {
-    return `${(n / 1_000_000_000).toFixed(2)}B`;
-  }
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
 
-  if (n >= 1_000_000) {
-    return `${(n / 1_000_000).toFixed(2)}M`;
-  }
-
-  if (n >= 1_000) {
-    return `${(n / 1_000).toFixed(1)}K`;
-  }
-
-  return `${n.toFixed(2)}`;
+  return n.toFixed(2);
 }
 
 function formatPrice(p: number): string {
-  if (!p || isNaN(p)) return "$0";
+  if (!Number.isFinite(p) || p <= 0) return "$0";
 
-  if (p < 0.000001) {
-    return `$${p.toExponential(2)}`;
-  }
-
-  if (p < 0.001) {
-    return `$${p.toFixed(8)}`;
-  }
-
-  if (p < 1) {
-    return `$${p.toFixed(6)}`;
-  }
-
+  if (p < 0.000001) return `$${p.toExponential(2)}`;
+  if (p < 0.001) return `$${p.toFixed(8)}`;
+  if (p < 1) return `$${p.toFixed(6)}`;
   if (p >= 1000) {
     return `$${p.toLocaleString("en-US", {
       maximumFractionDigits: 2,
@@ -48,9 +36,9 @@ function formatPrice(p: number): string {
 function getAge(ts: number): string {
   if (!ts) return "N/A";
 
-  const diff = Date.now() - ts;
+  const diff = Math.max(0, Date.now() - ts);
 
-  const mins = Math.floor(diff / 60000);
+  const mins = Math.floor(diff / 60_000);
   const hours = Math.floor(mins / 60);
   const days = Math.floor(hours / 24);
 
@@ -62,62 +50,59 @@ function getAge(ts: number): string {
 }
 
 function formatPair(pair: any) {
-  const price = Number(pair.priceUsd || 0);
+  const marketCap = num(pair.marketCap);
+  const fdv = num(pair.fdv);
 
-  const marketCap = Number(
-    pair.marketCap ??
-      pair.fdv ??
-      0
-  );
+  const liquidity = num(pair.liquidity?.usd);
 
-  const liquidity = Number(
-    pair.liquidity?.usd ??
-      0
-  );
+  const volume24h = num(pair.volume?.h24);
+  const volume1h = num(pair.volume?.h1);
 
-  const volume24h = Number(
-    pair.volume?.h24 ??
-      0
-  );
+  const buys24h = num(pair.txns?.h24?.buys);
+  const sells24h = num(pair.txns?.h24?.sells);
 
-  const volume1h = Number(
-    pair.volume?.h1 ??
-      0
-  );
+  const price = num(pair.priceUsd);
 
-  const buys24h = Number(
-    pair.txns?.h24?.buys ??
-      0
-  );
+  const pairCreatedAt = num(pair.pairCreatedAt);
 
-  const sells24h = Number(
-    pair.txns?.h24?.sells ??
-      0
-  );
+  const socials = Array.isArray(pair.info?.socials)
+    ? pair.info.socials
+    : [];
+
+  const websites = Array.isArray(pair.info?.websites)
+    ? pair.info.websites
+    : [];
 
   return {
+    chain: CHAIN,
+
     // Token
     ca: pair.baseToken?.address || "",
     name: pair.baseToken?.name || "Unknown",
     ticker: pair.baseToken?.symbol || "???",
 
+    // Exact pool
+    pairAddress: pair.pairAddress || "",
+    dexId: pair.dexId || "unknown",
+    source: pair.dexId || "unknown",
+
     // Price
     price,
     priceFormatted: formatPrice(price),
 
-    // Changes
-    change5m: Number(pair.priceChange?.m5 || 0),
-    change1h: Number(pair.priceChange?.h1 || 0),
-    change6h: Number(pair.priceChange?.h6 || 0),
-    change24h: Number(pair.priceChange?.h24 || 0),
+    // Market cap
+    // Prefer DexScreener marketCap.
+    // Only use FDV if marketCap is genuinely unavailable.
+    mcap: marketCap > 0 ? marketCap : fdv,
+    mcapFormatted: formatNum(
+      marketCap > 0 ? marketCap : fdv
+    ),
 
-    // Market data
-    mcap: marketCap,
-    mcapFormatted: formatNum(marketCap),
-
+    // Liquidity
     liq: liquidity,
     liqFormatted: formatNum(liquidity),
 
+    // Volume
     vol24h: volume24h,
     vol1h: volume1h,
     volFormatted: formatNum(volume24h),
@@ -126,54 +111,60 @@ function formatPair(pair: any) {
     buys24h,
     sells24h,
 
+    // Changes
+    change5m: num(pair.priceChange?.m5),
+    change1h: num(pair.priceChange?.h1),
+    change6h: num(pair.priceChange?.h6),
+    change24h: num(pair.priceChange?.h24),
+
     // Age
-    age: getAge(pair.pairCreatedAt),
-    ageMs: pair.pairCreatedAt || 0,
+    age: getAge(pairCreatedAt),
+    ageMs: pairCreatedAt,
 
-    // Pair information
-    pairAddress: pair.pairAddress || "",
-    dexId: pair.dexId || "",
-    source: pair.dexId || "unknown",
-
-    // Links
-    dexUrl:
-      pair.url ||
-      `https://dexscreener.com/${CHAIN}/${pair.pairAddress}`,
-
-    // Socials
+    // Image
     imageUrl: pair.info?.imageUrl || "",
 
-    website:
-      pair.info?.websites?.[0]?.url || "",
+    // Website
+    website: websites[0]?.url || "",
 
+    // Socials
     telegram:
-      pair.info?.socials?.find(
+      socials.find(
         (s: any) => s.type === "telegram"
       )?.url || "",
 
     twitter:
-      pair.info?.socials?.find(
-        (s: any) => s.type === "twitter"
+      socials.find(
+        (s: any) =>
+          s.type === "twitter" ||
+          s.type === "x"
       )?.url || "",
+
+    // DexScreener
+    dexUrl:
+      pair.url ||
+      `https://dexscreener.com/${CHAIN}/${pair.pairAddress}`,
+
+    // Useful raw values for detail page
+    baseToken: pair.baseToken || null,
+    quoteToken: pair.quoteToken || null,
+    quoteTokenAddress: pair.quoteToken?.address || "",
   };
 }
 
 function trendingScore(pair: any): number {
-  const vol24 = Number(pair.volume?.h24 || 0);
-  const vol1h = Number(pair.volume?.h1 || 0);
-
-  const buys24 = Number(pair.txns?.h24?.buys || 0);
-
-  const change24 = Number(
-    pair.priceChange?.h24 || 0
-  );
-
-  const liq = Number(
-    pair.liquidity?.usd || 0
-  );
+  const vol24 = num(pair.volume?.h24);
+  const vol1h = num(pair.volume?.h1);
+  const buys24 = num(pair.txns?.h24?.buys);
+  const change24 = num(pair.priceChange?.h24);
+  const liquidity = num(pair.liquidity?.usd);
 
   const ageHours = pair.pairCreatedAt
-    ? (Date.now() - pair.pairCreatedAt) / 3600000
+    ? Math.max(
+        0,
+        (Date.now() - Number(pair.pairCreatedAt)) /
+          3_600_000
+      )
     : 9999;
 
   const recency = Math.max(
@@ -181,7 +172,7 @@ function trendingScore(pair: any): number {
     200 - ageHours * 0.5
   );
 
-  const volScore =
+  const volumeScore =
     vol1h * 5 +
     vol24 * 0.3;
 
@@ -193,15 +184,15 @@ function trendingScore(pair: any): number {
       ? change24 * 3
       : 0;
 
-  const liqScore =
-    Math.min(liq / 1000, 100);
+  const liquidityScore =
+    Math.min(liquidity / 1000, 100);
 
   return (
-    volScore +
+    volumeScore +
     buyScore +
     momentumScore +
     recency +
-    liqScore
+    liquidityScore
   );
 }
 
@@ -209,32 +200,100 @@ async function dexSearch(
   query: string
 ): Promise<any[]> {
   try {
-    const res = await fetch(
-      `${BASE}/latest/dex/search?q=${encodeURIComponent(query)}`,
+    const response = await fetch(
+      `${BASE}/latest/dex/search?q=${encodeURIComponent(
+        query
+      )}`,
       {
         headers: {
           Accept: "application/json",
         },
-        next: {
-          revalidate: 20,
-        },
+        cache: "no-store",
       }
     );
 
-    if (!res.ok) {
+    if (!response.ok) {
+      console.error(
+        "DexScreener search failed:",
+        response.status
+      );
+
       return [];
     }
 
-    const data = await res.json();
+    const data = await response.json();
 
     return (data.pairs || []).filter(
-      (p: any) =>
-        p.chainId === CHAIN &&
-        Number(p.liquidity?.usd || 0) > 500
+      (pair: any) =>
+        pair.chainId === CHAIN &&
+        num(pair.liquidity?.usd) > 500
     );
-  } catch {
+  } catch (error) {
+    console.error(
+      "DexScreener search error:",
+      error
+    );
+
     return [];
   }
+}
+
+async function getExactPair(
+  pairAddress: string
+) {
+  const response = await fetch(
+    `${BASE}/latest/dex/pairs/${CHAIN}/${pairAddress}`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `DexScreener pair request failed: ${response.status}`
+    );
+  }
+
+  const data = await response.json();
+
+  const pair = (data.pairs || []).find(
+    (p: any) =>
+      p.chainId === CHAIN &&
+      p.pairAddress?.toLowerCase() ===
+        pairAddress.toLowerCase()
+  );
+
+  return pair || null;
+}
+
+async function getTokenPairs(
+  ca: string
+) {
+  const response = await fetch(
+    `${BASE}/latest/dex/tokens/${ca}`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `DexScreener token request failed: ${response.status}`
+    );
+  }
+
+  const data = await response.json();
+
+  return (data.pairs || []).filter(
+    (p: any) =>
+      p.chainId === CHAIN
+  );
 }
 
 const TRENDING_QUERIES = [
@@ -261,14 +320,14 @@ export async function GET(
   const { searchParams } =
     new URL(req.url);
 
-  const q =
-    searchParams.get("q");
-
   const ca =
     searchParams.get("ca");
 
   const pairAddress =
     searchParams.get("pair");
+
+  const q =
+    searchParams.get("q");
 
   const sort =
     searchParams.get("sort") ||
@@ -277,127 +336,26 @@ export async function GET(
   try {
     /*
      * =====================================================
-     * EXACT PAIR LOOKUP
+     * 1. EXACT PAIR
      * =====================================================
      *
-     * This is the important fix.
+     * This is the preferred detail-page lookup.
      *
-     * If the frontend gives us the pairAddress,
-     * we fetch THAT exact pair instead of asking
-     * DexScreener for the token and randomly selecting
-     * one of its pairs.
+     * Discover gives the detail page:
+     *
+     * CA + pairAddress
+     *
+     * The detail page then gets the exact same pool.
      */
 
     if (pairAddress) {
-      const res = await fetch(
-        `${BASE}/latest/dex/pairs/${CHAIN}/${pairAddress}`,
-        {
-          headers: {
-            Accept: "application/json",
-          },
-          cache: "no-store",
-        }
-      );
-
-      if (!res.ok) {
-        return NextResponse.json(
-          {
-            error: "Pair not found",
-          },
-          {
-            status: 404,
-          }
-        );
-      }
-
-      const data =
-        await res.json();
-
       const pair =
-        data.pairs?.[0];
-
-      if (
-        !pair ||
-        pair.chainId !== CHAIN
-      ) {
-        return NextResponse.json(
-          {
-            error: "Pair not found",
-          },
-          {
-            status: 404,
-          }
-        );
-      }
-
-      return NextResponse.json(
-        formatPair(pair)
-      );
-    }
-
-    /*
-     * =====================================================
-     * TOKEN CONTRACT LOOKUP
-     * =====================================================
-     *
-     * This remains as a fallback when there is no
-     * pairAddress.
-     */
-
-    if (ca) {
-      const res = await fetch(
-        `${BASE}/latest/dex/tokens/${ca}`,
-        {
-          headers: {
-            Accept: "application/json",
-          },
-          cache: "no-store",
-        }
-      );
-
-      if (!res.ok) {
-        return NextResponse.json(
-          {
-            error: "Token not found",
-          },
-          {
-            status: 404,
-          }
-        );
-      }
-
-      const data =
-        await res.json();
-
-      const robinhoodPairs =
-        (data.pairs || []).filter(
-          (p: any) =>
-            p.chainId === CHAIN
-        );
-
-      /*
-       * If there are multiple pools,
-       * choose the pool with the most liquidity.
-       *
-       * This is only a fallback.
-       * The exact pair lookup above is preferred.
-       */
-
-      const pair =
-        robinhoodPairs.sort(
-          (a: any, b: any) =>
-            Number(
-              b.liquidity?.usd || 0
-            ) -
-            Number(
-              a.liquidity?.usd || 0
-            )
-        )[0];
+        await getExactPair(pairAddress);
 
       if (!pair) {
         return NextResponse.json(
           {
-            error: "Token not found on Robinhood Chain",
+            error: "Pair not found on Robinhood Chain",
           },
           {
             status: 404,
@@ -406,13 +364,66 @@ export async function GET(
       }
 
       return NextResponse.json(
-        formatPair(pair)
+        formatPair(pair),
+        {
+          headers: {
+            "Cache-Control":
+              "no-store",
+          },
+        }
       );
     }
 
     /*
      * =====================================================
-     * SEARCH
+     * 2. TOKEN LOOKUP
+     * =====================================================
+     *
+     * Fallback when only a CA is supplied.
+     *
+     * We NEVER select a pair from another chain.
+     *
+     * If multiple Robinhood pairs exist, select the
+     * highest-liquidity pair.
+     */
+
+    if (ca) {
+      const pairs =
+        await getTokenPairs(ca);
+
+      if (!pairs.length) {
+        return NextResponse.json(
+          {
+            error:
+              "Token not found on Robinhood Chain",
+          },
+          {
+            status: 404,
+          }
+        );
+      }
+
+      const bestPair =
+        [...pairs].sort(
+          (a: any, b: any) =>
+            num(b.liquidity?.usd) -
+            num(a.liquidity?.usd)
+        )[0];
+
+      return NextResponse.json(
+        formatPair(bestPair),
+        {
+          headers: {
+            "Cache-Control":
+              "no-store",
+          },
+        }
+      );
+    }
+
+    /*
+     * =====================================================
+     * 3. SEARCH
      * =====================================================
      */
 
@@ -429,7 +440,7 @@ export async function GET(
 
     /*
      * =====================================================
-     * TRENDING
+     * 4. DISCOVER
      * =====================================================
      */
 
@@ -441,11 +452,11 @@ export async function GET(
         )
       );
 
-    const seen =
+    const seenPairs =
       new Set<string>();
 
-    const tokenCount =
-      new Map<string, number>();
+    const seenTokens =
+      new Set<string>();
 
     const pairs: any[] = [];
 
@@ -458,38 +469,41 @@ export async function GET(
       }
 
       for (const pair of result.value) {
-        const pairKey =
+        const pairAddress =
           pair.pairAddress;
 
-        const tokenKey =
-          pair.baseToken?.address?.toLowerCase();
+        const tokenAddress =
+          pair.baseToken?.address
+            ?.toLowerCase();
 
         if (
-          !pairKey ||
-          seen.has(pairKey)
+          !pairAddress ||
+          !tokenAddress
+        ) {
+          continue;
+        }
+
+        if (
+          seenPairs.has(pairAddress)
         ) {
           continue;
         }
 
         /*
-         * Only one pair per token
-         * in Discover.
+         * Discover displays one pool per token.
          */
-
-        const count =
-          tokenCount.get(
-            tokenKey
-          ) || 0;
-
-        if (count >= 1) {
+        if (
+          seenTokens.has(tokenAddress)
+        ) {
           continue;
         }
 
-        seen.add(pairKey);
+        seenPairs.add(
+          pairAddress
+        );
 
-        tokenCount.set(
-          tokenKey,
-          count + 1
+        seenTokens.add(
+          tokenAddress
         );
 
         pairs.push(pair);
@@ -502,46 +516,36 @@ export async function GET(
     if (sort === "new") {
       sorted.sort(
         (a, b) =>
-          (b.pairCreatedAt || 0) -
-          (a.pairCreatedAt || 0)
+          num(b.pairCreatedAt) -
+          num(a.pairCreatedAt)
       );
-    } else if (
-      sort === "volume"
-    ) {
+    }
+
+    else if (sort === "volume") {
       sorted.sort(
         (a, b) =>
-          Number(
-            b.volume?.h24 || 0
-          ) -
-          Number(
-            a.volume?.h24 || 0
-          )
+          num(b.volume?.h24) -
+          num(a.volume?.h24)
       );
-    } else if (
-      sort === "gainers"
-    ) {
+    }
+
+    else if (sort === "gainers") {
       sorted.sort(
         (a, b) =>
-          Number(
-            b.priceChange?.h24 || 0
-          ) -
-          Number(
-            a.priceChange?.h24 || 0
-          )
+          num(b.priceChange?.h24) -
+          num(a.priceChange?.h24)
       );
-    } else if (
-      sort === "losers"
-    ) {
+    }
+
+    else if (sort === "losers") {
       sorted.sort(
         (a, b) =>
-          Number(
-            a.priceChange?.h24 || 0
-          ) -
-          Number(
-            b.priceChange?.h24 || 0
-          )
+          num(a.priceChange?.h24) -
+          num(b.priceChange?.h24)
       );
-    } else {
+    }
+
+    else {
       sorted.sort(
         (a, b) =>
           trendingScore(b) -
@@ -552,18 +556,27 @@ export async function GET(
     return NextResponse.json(
       sorted
         .slice(0, 60)
-        .map(formatPair)
+        .map(formatPair),
+      {
+        headers: {
+          "Cache-Control":
+            "no-store",
+        },
+      }
     );
-  } catch (err) {
+  } catch (error) {
     console.error(
       "Market API error:",
-      err
+      error
     );
 
     return NextResponse.json(
-      [],
       {
-        status: 200,
+        error:
+          "Market data temporarily unavailable",
+      },
+      {
+        status: 503,
       }
     );
   }
